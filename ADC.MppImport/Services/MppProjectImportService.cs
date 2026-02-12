@@ -68,12 +68,16 @@ namespace ADC.MppImport.Services
             EntityReference bucketRef = GetOrCreateDefaultBucket(projectId);
             _trace?.Trace("Using project bucket: {0}", bucketRef.Id);
 
-            // 6. Create an OperationSet for the PSS batch
-            string operationSetId = CreateOperationSet(projectId, "MPP Import");
-            _trace?.Trace("OperationSet created: {0}", operationSetId);
+            // PSS limits each operation set to 200 requests.
+            // Batch 1: task creates/updates + parent links
+            // Batch 2: dependency records
+            const int PSS_BATCH_LIMIT = 200;
 
-            // 7. Pre-generate IDs for new tasks; build map of MPP UniqueID -> CRM record GUID
+            // 6. Pre-generate IDs for new tasks; build map of MPP UniqueID -> CRM record GUID
             var taskIdMap = new Dictionary<int, Guid>();
+
+            // Collect all task operations first to allow batching
+            var taskOps = new List<Action<string>>();
 
             // First pass: queue PssCreate or PssUpdate for each task
             foreach (var mppTask in project.Tasks)
@@ -88,29 +92,29 @@ namespace ADC.MppImport.Services
 
                 if (existing != null)
                 {
-                    // Update via PSS
                     taskEntity.Id = existing.Id;
                     taskEntity.LogicalName = "msdyn_projecttask";
-                    PssUpdate(taskEntity, operationSetId);
+                    var capturedEntity = taskEntity;
+                    taskOps.Add(osId => PssUpdate(capturedEntity, osId));
                     taskIdMap[mppTask.UniqueID.Value] = existing.Id;
                     result.TasksUpdated++;
                     _trace?.Trace("  Queued UPDATE for task [{0}] {1}", mppTask.UniqueID.Value, mppTask.Name);
                 }
                 else
                 {
-                    // Create via PSS — pre-generate an ID so we can reference it for parent links
                     Guid newId = Guid.NewGuid();
                     taskEntity.Id = newId;
                     taskEntity["msdyn_projecttaskid"] = newId;
-                    PssCreate(taskEntity, operationSetId);
+                    var capturedEntity = taskEntity;
+                    taskOps.Add(osId => PssCreate(capturedEntity, osId));
                     taskIdMap[mppTask.UniqueID.Value] = newId;
                     result.TasksCreated++;
                     _trace?.Trace("  Queued CREATE for task [{0}] {1} -> {2}", mppTask.UniqueID.Value, mppTask.Name, newId);
                 }
             }
 
-            // 8. Second pass: queue PssUpdate to set parent task references
-            int parentLinksSet = 0;
+            // Second pass: parent link updates
+            var parentOps = new List<Action<string>>();
             foreach (var mppTask in project.Tasks)
             {
                 if (!mppTask.UniqueID.HasValue) continue;
@@ -123,23 +127,21 @@ namespace ADC.MppImport.Services
 
                 var update = new Entity("msdyn_projecttask", taskRecordId);
                 update["msdyn_parenttask"] = new EntityReference("msdyn_projecttask", parentRecordId);
-                PssUpdate(update, operationSetId);
-                parentLinksSet++;
+                var capturedUpdate = update;
+                parentOps.Add(osId => PssUpdate(capturedUpdate, osId));
             }
 
-            _trace?.Trace("Parent links queued: {0}", parentLinksSet);
+            _trace?.Trace("Parent links queued: {0}", parentOps.Count);
 
-            // 9. Third pass: create predecessor/successor dependency records
-            //    First check if the MPP file has explicit predecessor relationships
+            // Third pass: dependency records
             int totalMppPredecessors = 0;
             foreach (var t in project.Tasks)
                 totalMppPredecessors += (t.Predecessors != null ? t.Predecessors.Count : 0);
 
-            int dependenciesCreated = 0;
+            var depOps = new List<Action<string>>();
 
             if (totalMppPredecessors > 0)
             {
-                // Use explicit MPP predecessor data
                 _trace?.Trace("MPP has {0} explicit predecessor relationships, using those.", totalMppPredecessors);
                 foreach (var mppTask in project.Tasks)
                 {
@@ -161,50 +163,67 @@ namespace ADC.MppImport.Services
                         dep["msdyn_predecessortask"] = new EntityReference("msdyn_projecttask", predecessorId);
                         dep["msdyn_successortask"] = new EntityReference("msdyn_projecttask", successorId);
                         dep["msdyn_linktype"] = new OptionSetValue(MapRelationType(relation.Type));
-
-                        PssCreate(dep, operationSetId);
-                        dependenciesCreated++;
+                        var capturedDep = dep;
+                        depOps.Add(osId => PssCreate(capturedDep, osId));
                     }
                 }
             }
             else
             {
-                // No explicit predecessors — auto-create sequential Finish-to-Start dependencies
-                // between consecutive sibling tasks within each parent group
                 _trace?.Trace("MPP has no predecessor relationships. Auto-creating sequential FS dependencies.");
-                dependenciesCreated = CreateAutoSequentialDependencies(project, projectRef, taskIdMap, operationSetId);
+                // Build dependency entities for auto-sequential
+                depOps = BuildAutoSequentialDependencyOps(project, projectRef, taskIdMap);
             }
 
-            _trace?.Trace("Dependencies queued: {0}", dependenciesCreated);
-            result.DependenciesCreated = dependenciesCreated;
+            result.DependenciesCreated = depOps.Count;
+            _trace?.Trace("Dependencies queued: {0}", depOps.Count);
 
-            // 10. Execute the OperationSet to commit all changes
-            _trace?.Trace("Executing OperationSet...");
-            try
-            {
-                string executeResult = ExecuteOperationSet(operationSetId);
-                _trace?.Trace("OperationSet executed successfully. Result: {0}", executeResult ?? "(none)");
-            }
-            catch (Exception ex)
-            {
-                _trace?.Trace("OperationSet execution failed: {0}", ex.Message);
-                if (ex.InnerException != null)
-                    _trace?.Trace("Inner: {0}", ex.InnerException.Message);
+            // 7. Execute operations in batches of up to PSS_BATCH_LIMIT
+            //    Merge all operations into a single list, preserving order (creates -> parents -> deps)
+            var allOps = new List<Action<string>>();
+            allOps.AddRange(taskOps);
+            allOps.AddRange(parentOps);
+            allOps.AddRange(depOps);
 
-                // Query the operation set record for detailed error info
+            int totalOps = allOps.Count;
+            int batchStart = 0;
+            int batchNum = 0;
+
+            while (batchStart < totalOps)
+            {
+                int batchSize = Math.Min(PSS_BATCH_LIMIT, totalOps - batchStart);
+                batchNum++;
+
+                string operationSetId = CreateOperationSet(projectId, string.Format("MPP Import Batch {0}", batchNum));
+                _trace?.Trace("OperationSet batch {0} created: {1} ({2} ops)", batchNum, operationSetId, batchSize);
+
+                for (int i = batchStart; i < batchStart + batchSize; i++)
+                {
+                    allOps[i](operationSetId);
+                }
+
                 try
                 {
-                    LogOperationSetStatus(operationSetId);
+                    string executeResult = ExecuteOperationSet(operationSetId);
+                    _trace?.Trace("Batch {0} executed successfully. Result: {1}", batchNum, executeResult ?? "(none)");
                 }
-                catch (Exception logEx)
+                catch (Exception ex)
                 {
-                    _trace?.Trace("Could not retrieve OperationSet status: {0}", logEx.Message);
+                    _trace?.Trace("Batch {0} execution failed: {1}", batchNum, ex.Message);
+                    if (ex.InnerException != null)
+                        _trace?.Trace("Inner: {0}", ex.InnerException.Message);
+
+                    try { LogOperationSetStatus(operationSetId); }
+                    catch (Exception logEx) { _trace?.Trace("Could not retrieve OperationSet status: {0}", logEx.Message); }
+
+                    throw;
                 }
 
-                throw;
+                batchStart += batchSize;
             }
 
-            _trace?.Trace("Import complete. Created: {0}, Updated: {1}", result.TasksCreated, result.TasksUpdated);
+            _trace?.Trace("Import complete. {0} batches, Created: {1}, Updated: {2}, Dependencies: {3}",
+                batchNum, result.TasksCreated, result.TasksUpdated, result.DependenciesCreated);
             return result;
         }
 
@@ -343,14 +362,13 @@ namespace ADC.MppImport.Services
         }
 
         /// <summary>
-        /// Auto-creates sequential Finish-to-Start dependencies between consecutive sibling tasks.
+        /// Builds deferred dependency-create operations for auto-sequential FS dependencies.
         /// Groups tasks by their parent and chains each task to the next within that group.
-        /// Also chains top-level summary groups sequentially.
         /// </summary>
-        private int CreateAutoSequentialDependencies(ProjectFile project, EntityReference projectRef,
-            Dictionary<int, Guid> taskIdMap, string operationSetId)
+        private List<Action<string>> BuildAutoSequentialDependencyOps(ProjectFile project, EntityReference projectRef,
+            Dictionary<int, Guid> taskIdMap)
         {
-            int count = 0;
+            var ops = new List<Action<string>>();
 
             // Group tasks by parent UniqueID (null parent = top-level)
             var childrenByParent = new Dictionary<int, List<Task>>();
@@ -391,15 +409,15 @@ namespace ADC.MppImport.Services
                     dep["msdyn_successortask"] = new EntityReference("msdyn_projecttask", successorId);
                     dep["msdyn_linktype"] = new OptionSetValue(192350000); // Finish-to-Start
 
-                    PssCreate(dep, operationSetId);
-                    count++;
+                    var capturedDep = dep;
+                    ops.Add(osId => PssCreate(capturedDep, osId));
 
                     _trace?.Trace("    FS: [{0}] {1} -> [{2}] {3}",
                         prevTask.UniqueID, prevTask.Name, currTask.UniqueID, currTask.Name);
                 }
             }
 
-            return count;
+            return ops;
         }
 
         /// <summary>

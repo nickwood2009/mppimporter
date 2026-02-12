@@ -142,24 +142,29 @@ namespace ADC.MppImport.Services
 
             batchNum = ExecuteOpsBatched(taskAndParentOps, projectId, PSS_BATCH_LIMIT_PHASE, "Tasks", batchNum);
 
-            // After phase 1 completes, verify which tasks actually exist in CRM.
-            // PSS may silently reject some creates; only build dependencies for verified tasks.
-            var verifiedTaskIds = new HashSet<Guid>();
-            var verifiedTasks = RetrieveExistingProjectTasks(projectId);
-            foreach (var vt in verifiedTasks)
-                verifiedTaskIds.Add(vt.Id);
+            // After phase 1 completes, rebuild taskIdMap from actual CRM records.
+            // PSS may assign its own GUIDs rather than honouring our pre-generated ones.
+            var actualTasks = RetrieveExistingProjectTasks(projectId);
+            var actualTaskIdMap = new Dictionary<int, Guid>();
+            foreach (var at in actualTasks)
+            {
+                string cid = at.GetAttributeValue<string>("msdyn_msprojectclientid");
+                int mppId;
+                if (!string.IsNullOrEmpty(cid) && int.TryParse(cid, out mppId))
+                    actualTaskIdMap[mppId] = at.Id;
+            }
 
             _trace?.Trace("Verified {0} tasks exist in CRM after phase 1 ({1} were requested)",
-                verifiedTaskIds.Count, taskIdMap.Count);
+                actualTaskIdMap.Count, taskIdMap.Count);
 
             // Log any tasks that failed to create
             foreach (var kvp in taskIdMap)
             {
-                if (!verifiedTaskIds.Contains(kvp.Value))
-                    _trace?.Trace("  WARNING: Task MPP#{0} with GUID {1} was NOT created by PSS", kvp.Key, kvp.Value);
+                if (!actualTaskIdMap.ContainsKey(kvp.Key))
+                    _trace?.Trace("  WARNING: Task MPP#{0} was NOT created by PSS", kvp.Key);
             }
 
-            // Phase 2: build dependency ops using only verified task GUIDs
+            // Phase 2: build dependency ops using actual CRM task GUIDs
             int totalMppPredecessors = 0;
             foreach (var t in project.Tasks)
                 totalMppPredecessors += (t.Predecessors != null ? t.Predecessors.Count : 0);
@@ -175,14 +180,12 @@ namespace ADC.MppImport.Services
                     if (mppTask.Predecessors == null || mppTask.Predecessors.Count == 0) continue;
 
                     Guid successorId;
-                    if (!taskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
-                    if (!verifiedTaskIds.Contains(successorId)) continue;
+                    if (!actualTaskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
 
                     foreach (var relation in mppTask.Predecessors)
                     {
                         Guid predecessorId;
-                        if (!taskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
-                        if (!verifiedTaskIds.Contains(predecessorId)) continue;
+                        if (!actualTaskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
 
                         var dep = new Entity("msdyn_projecttaskdependency");
                         dep.Id = Guid.NewGuid();
@@ -199,7 +202,7 @@ namespace ADC.MppImport.Services
             else
             {
                 _trace?.Trace("MPP has no predecessor relationships. Auto-creating sequential FS dependencies.");
-                depOps = BuildAutoSequentialDependencyOps(project, projectRef, taskIdMap);
+                depOps = BuildAutoSequentialDependencyOps(project, projectRef, actualTaskIdMap);
             }
 
             result.DependenciesCreated = depOps.Count;

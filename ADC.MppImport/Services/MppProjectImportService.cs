@@ -142,55 +142,8 @@ namespace ADC.MppImport.Services
 
             batchNum = ExecuteOpsBatched(taskAndParentOps, projectId, PSS_BATCH_LIMIT_PHASE, "Tasks", batchNum);
 
-            // After phase 1 completes, rebuild taskIdMap from actual CRM records.
-            // PSS assigns its own GUIDs and doesn't allow msdyn_msprojectclientid on create,
-            // so we match by task name, stamp the client ID via direct SDK Update, then rebuild the map.
-            var actualTasks = RetrieveExistingProjectTasks(projectId);
-            _trace?.Trace("Found {0} tasks in CRM after phase 1", actualTasks.Count);
-
-            // Build name->CRM task lookup (CRM tasks don't have client ID yet)
-            var crmByName = new Dictionary<string, Entity>();
-            foreach (var at in actualTasks)
-            {
-                string name = at.GetAttributeValue<string>("msdyn_subject");
-                if (!string.IsNullOrEmpty(name) && !crmByName.ContainsKey(name))
-                    crmByName[name] = at;
-            }
-
-            // Match MPP tasks to CRM tasks by name, stamp msdyn_msprojectclientid via direct SDK Update
-            var actualTaskIdMap = new Dictionary<int, Guid>();
-            int stamped = 0;
-            foreach (var mppTask in project.Tasks)
-            {
-                if (!mppTask.UniqueID.HasValue || string.IsNullOrEmpty(mppTask.Name)) continue;
-
-                Entity crmTask;
-                if (!crmByName.TryGetValue(mppTask.Name, out crmTask)) continue;
-
-                actualTaskIdMap[mppTask.UniqueID.Value] = crmTask.Id;
-
-                // Stamp client ID via direct SDK update (PSS doesn't allow it on create)
-                string existingCid = crmTask.GetAttributeValue<string>("msdyn_msprojectclientid");
-                if (string.IsNullOrEmpty(existingCid) || existingCid != mppTask.UniqueID.Value.ToString())
-                {
-                    var stampUpdate = new Entity("msdyn_projecttask", crmTask.Id);
-                    stampUpdate["msdyn_msprojectclientid"] = mppTask.UniqueID.Value.ToString();
-                    _service.Update(stampUpdate);
-                    stamped++;
-                }
-            }
-
-            _trace?.Trace("Mapped {0} tasks by name, stamped msdyn_msprojectclientid on {1} ({2} MPP tasks total)",
-                actualTaskIdMap.Count, stamped, taskIdMap.Count);
-
-            // Log any tasks that failed to map
-            foreach (var kvp in taskIdMap)
-            {
-                if (!actualTaskIdMap.ContainsKey(kvp.Key))
-                    _trace?.Trace("  WARNING: Task MPP#{0} could not be matched to a CRM task", kvp.Key);
-            }
-
-            // Phase 2: build dependency ops using actual CRM task GUIDs
+            // Phase 2: build dependency ops using pre-generated taskIdMap GUIDs.
+            // Polling ensures tasks are committed before we reference them in dependencies.
             int totalMppPredecessors = 0;
             foreach (var t in project.Tasks)
                 totalMppPredecessors += (t.Predecessors != null ? t.Predecessors.Count : 0);
@@ -206,12 +159,12 @@ namespace ADC.MppImport.Services
                     if (mppTask.Predecessors == null || mppTask.Predecessors.Count == 0) continue;
 
                     Guid successorId;
-                    if (!actualTaskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
+                    if (!taskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
 
                     foreach (var relation in mppTask.Predecessors)
                     {
                         Guid predecessorId;
-                        if (!actualTaskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
+                        if (!taskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
 
                         var dep = new Entity("msdyn_projecttaskdependency");
                         dep.Id = Guid.NewGuid();
@@ -228,7 +181,7 @@ namespace ADC.MppImport.Services
             else
             {
                 _trace?.Trace("MPP has no predecessor relationships. Auto-creating sequential FS dependencies.");
-                depOps = BuildAutoSequentialDependencyOps(project, projectRef, actualTaskIdMap);
+                depOps = BuildAutoSequentialDependencyOps(project, projectRef, taskIdMap);
             }
 
             result.DependenciesCreated = depOps.Count;

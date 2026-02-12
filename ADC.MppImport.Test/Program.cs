@@ -153,7 +153,16 @@ namespace ADC.MppImport.Test
                 Console.WriteLine("Resources:    {0}", project.Resources.Count);
                 Console.WriteLine("Assignments:  {0}", project.Assignments.Count);
                 Console.WriteLine("Calendars:    {0}", project.Calendars.Count);
+
+                int totalPredecessors = 0;
+                foreach (var t2 in project.Tasks) totalPredecessors += t2.Predecessors.Count;
+                Console.WriteLine("Relations:    {0}", totalPredecessors);
                 Console.WriteLine("Errors:       {0}", project.IgnoredErrors.Count);
+                if (project.IgnoredErrors.Count > 0)
+                {
+                    foreach (var err in project.IgnoredErrors)
+                        Console.WriteLine("  ERR: {0}", err.Message);
+                }
 
                 Console.WriteLine();
                 Console.WriteLine("--- Tasks ---");
@@ -161,9 +170,12 @@ namespace ADC.MppImport.Test
                 foreach (var t in project.Tasks)
                 {
                     if (shown++ >= 20) { Console.WriteLine("  ... ({0} more)", project.Tasks.Count - 20); break; }
-                    Console.WriteLine("  [{0,3}] {1,-40} Start={2:d}  Dur={3,-20} %={4}",
+                    string preds = t.Predecessors.Count > 0
+                        ? string.Join(",", t.Predecessors.Select(p => p.SourceTaskUniqueID + "(" + p.Type + ")"))
+                        : "";
+                    Console.WriteLine("  [{0,3}] {1,-40} Start={2:d}  Dur={3,-12} Pred={4}",
                         t.UniqueID, Trunc(t.Name, 40),
-                        t.Start, t.Duration, t.PercentComplete);
+                        t.Start, t.Duration, preds);
                 }
 
                 if (project.Resources.Count > 0)

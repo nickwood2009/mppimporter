@@ -676,8 +676,7 @@ namespace ADC.MppImport.Services
                 {
                     Conditions =
                     {
-                        new ConditionExpression("msdyn_project", ConditionOperator.Equal, projectId),
-                        new ConditionExpression("statecode", ConditionOperator.Equal, 0) // active only
+                        new ConditionExpression("msdyn_project", ConditionOperator.Equal, projectId)
                     }
                 }
             };

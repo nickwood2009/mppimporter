@@ -68,10 +68,6 @@ namespace ADC.MppImport.Services
             EntityReference bucketRef = GetOrCreateDefaultBucket(projectId);
             _trace?.Trace("Using project bucket: {0}", bucketRef.Id);
 
-            // PSS limits each operation set to 200 requests.
-            // Batch 1: task creates/updates + parent links
-            // Batch 2: dependency records
-            const int PSS_BATCH_LIMIT = 200;
 
             // 6. Pre-generate IDs for new tasks; build map of MPP UniqueID -> CRM record GUID
             var taskIdMap = new Dictionary<int, Guid>();
@@ -133,7 +129,37 @@ namespace ADC.MppImport.Services
 
             _trace?.Trace("Parent links queued: {0}", parentOps.Count);
 
-            // Third pass: dependency records
+            // 7. Execute in two phases to ensure tasks exist before dependencies reference them.
+            //    Phase 1: task creates/updates + parent links
+            //    Phase 2: dependency records
+            const int PSS_BATCH_LIMIT_PHASE = 200;
+            int batchNum = 0;
+
+            // Phase 1: tasks + parent links (batched if > 200)
+            var taskAndParentOps = new List<Action<string>>();
+            taskAndParentOps.AddRange(taskOps);
+            taskAndParentOps.AddRange(parentOps);
+
+            batchNum = ExecuteOpsBatched(taskAndParentOps, projectId, PSS_BATCH_LIMIT_PHASE, "Tasks", batchNum);
+
+            // After phase 1 completes, verify which tasks actually exist in CRM.
+            // PSS may silently reject some creates; only build dependencies for verified tasks.
+            var verifiedTaskIds = new HashSet<Guid>();
+            var verifiedTasks = RetrieveExistingProjectTasks(projectId);
+            foreach (var vt in verifiedTasks)
+                verifiedTaskIds.Add(vt.Id);
+
+            _trace?.Trace("Verified {0} tasks exist in CRM after phase 1 ({1} were requested)",
+                verifiedTaskIds.Count, taskIdMap.Count);
+
+            // Log any tasks that failed to create
+            foreach (var kvp in taskIdMap)
+            {
+                if (!verifiedTaskIds.Contains(kvp.Value))
+                    _trace?.Trace("  WARNING: Task MPP#{0} with GUID {1} was NOT created by PSS", kvp.Key, kvp.Value);
+            }
+
+            // Phase 2: build dependency ops using only verified task GUIDs
             int totalMppPredecessors = 0;
             foreach (var t in project.Tasks)
                 totalMppPredecessors += (t.Predecessors != null ? t.Predecessors.Count : 0);
@@ -150,11 +176,13 @@ namespace ADC.MppImport.Services
 
                     Guid successorId;
                     if (!taskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
+                    if (!verifiedTaskIds.Contains(successorId)) continue;
 
                     foreach (var relation in mppTask.Predecessors)
                     {
                         Guid predecessorId;
                         if (!taskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
+                        if (!verifiedTaskIds.Contains(predecessorId)) continue;
 
                         var dep = new Entity("msdyn_projecttaskdependency");
                         dep.Id = Guid.NewGuid();
@@ -171,28 +199,15 @@ namespace ADC.MppImport.Services
             else
             {
                 _trace?.Trace("MPP has no predecessor relationships. Auto-creating sequential FS dependencies.");
-                // Build dependency entities for auto-sequential
                 depOps = BuildAutoSequentialDependencyOps(project, projectRef, taskIdMap);
             }
 
             result.DependenciesCreated = depOps.Count;
             _trace?.Trace("Dependencies queued: {0}", depOps.Count);
 
-            // 7. Execute in two phases to ensure tasks exist before dependencies reference them.
-            //    Phase 1: task creates/updates + parent links
-            //    Phase 2: dependency records
-            int batchNum = 0;
-
-            // Phase 1: tasks + parent links (batched if > 200)
-            var taskAndParentOps = new List<Action<string>>();
-            taskAndParentOps.AddRange(taskOps);
-            taskAndParentOps.AddRange(parentOps);
-
-            batchNum = ExecuteOpsBatched(taskAndParentOps, projectId, PSS_BATCH_LIMIT, "Tasks", batchNum);
-
-            // Phase 2: dependencies (batched if > 200)
+            // Execute dependencies (batched if > 200)
             if (depOps.Count > 0)
-                batchNum = ExecuteOpsBatched(depOps, projectId, PSS_BATCH_LIMIT, "Dependencies", batchNum);
+                batchNum = ExecuteOpsBatched(depOps, projectId, PSS_BATCH_LIMIT_PHASE, "Dependencies", batchNum);
 
             _trace?.Trace("Import complete. {0} batches, Created: {1}, Updated: {2}, Dependencies: {3}",
                 batchNum, result.TasksCreated, result.TasksUpdated, result.DependenciesCreated);

@@ -6,3 +6,4 @@ obj/
 *.cache
 packages/
 *.nupkg
+.env

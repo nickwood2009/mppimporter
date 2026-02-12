@@ -10,7 +10,7 @@ namespace ADC.MppImport.Services
 {
     /// <summary>
     /// Testable business logic for importing MPP file tasks into Project Operations.
-    /// No workflow/CRM framework dependencies in the constructor — only IOrganizationService + ITracingService passed in.
+    /// Uses the Project Scheduling Service (PSS) API to create/update msdyn_projecttask records.
     /// </summary>
     public class MppProjectImportService
     {
@@ -25,8 +25,7 @@ namespace ADC.MppImport.Services
 
         /// <summary>
         /// Main entry point: reads MPP from the case template file field, parses it,
-        /// and upserts project tasks into msdyn_projecttask for the given project.
-        /// Returns an ImportResult with counts.
+        /// and creates/updates project tasks via the PSS API for the given project.
         /// </summary>
         public ImportResult Execute(Guid caseTemplateId, Guid projectId)
         {
@@ -64,10 +63,19 @@ namespace ADC.MppImport.Services
                     existingByClientId[clientId] = et;
             }
 
-            // 5. First pass: create/update tasks and build a map of MPP UniqueID -> msdyn_projecttask ID
-            var taskIdMap = new Dictionary<int, Guid>(); // MPP UniqueID -> CRM record ID
+            // 5. Retrieve or create the default project bucket
             var projectRef = new EntityReference("msdyn_project", projectId);
+            EntityReference bucketRef = GetOrCreateDefaultBucket(projectId);
+            _trace?.Trace("Using project bucket: {0}", bucketRef.Id);
 
+            // 6. Create an OperationSet for the PSS batch
+            string operationSetId = CreateOperationSet(projectId, "MPP Import");
+            _trace?.Trace("OperationSet created: {0}", operationSetId);
+
+            // 7. Pre-generate IDs for new tasks; build map of MPP UniqueID -> CRM record GUID
+            var taskIdMap = new Dictionary<int, Guid>();
+
+            // First pass: queue PssCreate or PssUpdate for each task
             foreach (var mppTask in project.Tasks)
             {
                 if (!mppTask.UniqueID.HasValue) continue;
@@ -76,26 +84,33 @@ namespace ADC.MppImport.Services
                 Entity existing = null;
                 existingByClientId.TryGetValue(clientId, out existing);
 
-                Entity taskEntity = MapMppTaskToEntity(mppTask, projectRef, clientId);
+                Entity taskEntity = MapMppTaskToEntity(mppTask, projectRef, bucketRef);
 
                 if (existing != null)
                 {
-                    // Update
+                    // Update via PSS
                     taskEntity.Id = existing.Id;
-                    _service.Update(taskEntity);
+                    taskEntity.LogicalName = "msdyn_projecttask";
+                    PssUpdate(taskEntity, operationSetId);
                     taskIdMap[mppTask.UniqueID.Value] = existing.Id;
                     result.TasksUpdated++;
+                    _trace?.Trace("  Queued UPDATE for task [{0}] {1}", mppTask.UniqueID.Value, mppTask.Name);
                 }
                 else
                 {
-                    // Create
-                    Guid newId = _service.Create(taskEntity);
+                    // Create via PSS — pre-generate an ID so we can reference it for parent links
+                    Guid newId = Guid.NewGuid();
+                    taskEntity.Id = newId;
+                    taskEntity["msdyn_projecttaskid"] = newId;
+                    PssCreate(taskEntity, operationSetId);
                     taskIdMap[mppTask.UniqueID.Value] = newId;
                     result.TasksCreated++;
+                    _trace?.Trace("  Queued CREATE for task [{0}] {1} -> {2}", mppTask.UniqueID.Value, mppTask.Name, newId);
                 }
             }
 
-            // 6. Second pass: set parent task references
+            // 8. Second pass: queue PssUpdate to set parent task references
+            int parentLinksSet = 0;
             foreach (var mppTask in project.Tasks)
             {
                 if (!mppTask.UniqueID.HasValue) continue;
@@ -108,63 +123,220 @@ namespace ADC.MppImport.Services
 
                 var update = new Entity("msdyn_projecttask", taskRecordId);
                 update["msdyn_parenttask"] = new EntityReference("msdyn_projecttask", parentRecordId);
+                PssUpdate(update, operationSetId);
+                parentLinksSet++;
+            }
+
+            _trace?.Trace("Parent links queued: {0}", parentLinksSet);
+
+            // 9. Third pass: create predecessor/successor dependency records
+            int dependenciesCreated = 0;
+            foreach (var mppTask in project.Tasks)
+            {
+                if (!mppTask.UniqueID.HasValue) continue;
+                if (mppTask.Predecessors == null || mppTask.Predecessors.Count == 0) continue;
+
+                Guid successorId;
+                if (!taskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
+
+                foreach (var relation in mppTask.Predecessors)
+                {
+                    Guid predecessorId;
+                    if (!taskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
+
+                    var dep = new Entity("msdyn_projecttaskdependency");
+                    dep.Id = Guid.NewGuid();
+                    dep["msdyn_projecttaskdependencyid"] = dep.Id;
+                    dep["msdyn_project"] = projectRef;
+                    dep["msdyn_predecessortask"] = new EntityReference("msdyn_projecttask", predecessorId);
+                    dep["msdyn_successortask"] = new EntityReference("msdyn_projecttask", successorId);
+                    dep["msdyn_linktype"] = new OptionSetValue(MapRelationType(relation.Type));
+
+                    PssCreate(dep, operationSetId);
+                    dependenciesCreated++;
+                }
+            }
+
+            _trace?.Trace("Dependencies queued: {0}", dependenciesCreated);
+            result.DependenciesCreated = dependenciesCreated;
+
+            // 10. Execute the OperationSet to commit all changes
+            _trace?.Trace("Executing OperationSet...");
+            try
+            {
+                string executeResult = ExecuteOperationSet(operationSetId);
+                _trace?.Trace("OperationSet executed successfully. Result: {0}", executeResult ?? "(none)");
+            }
+            catch (Exception ex)
+            {
+                _trace?.Trace("OperationSet execution failed: {0}", ex.Message);
+                if (ex.InnerException != null)
+                    _trace?.Trace("Inner: {0}", ex.InnerException.Message);
+
+                // Query the operation set record for detailed error info
                 try
                 {
-                    _service.Update(update);
+                    LogOperationSetStatus(operationSetId);
                 }
-                catch (Exception ex)
+                catch (Exception logEx)
                 {
-                    _trace?.Trace("Warning: Could not set parent for task {0}: {1}",
-                        mppTask.UniqueID.Value, ex.Message);
+                    _trace?.Trace("Could not retrieve OperationSet status: {0}", logEx.Message);
                 }
+
+                throw;
             }
 
             _trace?.Trace("Import complete. Created: {0}, Updated: {1}", result.TasksCreated, result.TasksUpdated);
             return result;
         }
 
+        #region PSS API Helpers
+
+        /// <summary>
+        /// Calls msdyn_CreateOperationSetV1 to create a new operation set for batching PSS operations.
+        /// </summary>
+        private string CreateOperationSet(Guid projectId, string description)
+        {
+            var request = new OrganizationRequest("msdyn_CreateOperationSetV1");
+            request["ProjectId"] = projectId.ToString();
+            request["Description"] = description;
+            var response = _service.Execute(request);
+            return (string)response["OperationSetId"];
+        }
+
+        /// <summary>
+        /// Calls msdyn_PssCreateV1 to queue a create operation in the operation set.
+        /// </summary>
+        private void PssCreate(Entity entity, string operationSetId)
+        {
+            var request = new OrganizationRequest("msdyn_PssCreateV1");
+            request["Entity"] = entity;
+            request["OperationSetId"] = operationSetId;
+            _service.Execute(request);
+        }
+
+        /// <summary>
+        /// Calls msdyn_PssUpdateV1 to queue an update operation in the operation set.
+        /// </summary>
+        private void PssUpdate(Entity entity, string operationSetId)
+        {
+            var request = new OrganizationRequest("msdyn_PssUpdateV1");
+            request["Entity"] = entity;
+            request["OperationSetId"] = operationSetId;
+            _service.Execute(request);
+        }
+
+        /// <summary>
+        /// Calls msdyn_ExecuteOperationSetV1 to commit all queued operations.
+        /// </summary>
+        private string ExecuteOperationSet(string operationSetId)
+        {
+            var request = new OrganizationRequest("msdyn_ExecuteOperationSetV1");
+            request["OperationSetId"] = operationSetId;
+            var response = _service.Execute(request);
+
+            // Safely read result — key may vary by version
+            foreach (var kvp in response.Results)
+            {
+                _trace?.Trace("  Response key: {0} = {1}", kvp.Key, kvp.Value);
+            }
+
+            if (response.Results.ContainsKey("OperationSetDetailId"))
+                return response["OperationSetDetailId"] as string;
+
+            return operationSetId;
+        }
+
+        /// <summary>
+        /// Queries the msdyn_operationset record to log detailed status/error info.
+        /// </summary>
+        private void LogOperationSetStatus(string operationSetId)
+        {
+            Guid osId;
+            if (!Guid.TryParse(operationSetId, out osId)) return;
+
+            var osRecord = _service.Retrieve("msdyn_operationset", osId,
+                new ColumnSet("msdyn_status", "msdyn_statuscode", "msdyn_description"));
+
+            foreach (var attr in osRecord.Attributes)
+            {
+                _trace?.Trace("  OperationSet.{0} = {1}", attr.Key, attr.Value);
+            }
+
+            // Also check for failed operation set detail records
+            var detailQuery = new QueryExpression("msdyn_operationsetdetail")
+            {
+                ColumnSet = new ColumnSet(true),
+                TopCount = 10,
+                Criteria = new FilterExpression
+                {
+                    Conditions =
+                    {
+                        new ConditionExpression("msdyn_operationsetid", ConditionOperator.Equal, osId)
+                    }
+                }
+            };
+
+            var details = _service.RetrieveMultiple(detailQuery);
+            _trace?.Trace("  OperationSetDetail records: {0}", details.Entities.Count);
+            foreach (var detail in details.Entities)
+            {
+                foreach (var attr in detail.Attributes)
+                {
+                    _trace?.Trace("    {0} = {1}", attr.Key, attr.Value);
+                }
+                _trace?.Trace("    ---");
+            }
+        }
+
+        #endregion
+
+        #region Task Mapping
+
         /// <summary>
         /// Maps an MPP Task to a msdyn_projecttask Entity for create/update.
         /// </summary>
-        private Entity MapMppTaskToEntity(Task mppTask, EntityReference projectRef, string clientId)
+        private Entity MapMppTaskToEntity(Task mppTask, EntityReference projectRef, EntityReference bucketRef)
         {
             var entity = new Entity("msdyn_projecttask");
             entity["msdyn_project"] = projectRef;
-            entity["msdyn_msprojectclientid"] = clientId;
+            entity["msdyn_projectbucket"] = bucketRef;
             entity["msdyn_subject"] = mppTask.Name ?? "(Unnamed Task)";
+            entity["msdyn_LinkStatus"] = new OptionSetValue(192350000); // Not Linked
 
-            if (mppTask.Duration != null && mppTask.Duration.Value > 0)
+            // Summary tasks (parents): PSS auto-calculates duration/effort from children
+            // Only set duration/effort on leaf tasks
+            if (!mppTask.HasChildTasks)
             {
-                // msdyn_duration expects decimal hours; convert based on units
-                double durationHours = ConvertToHours(mppTask.Duration);
-                // Convert to days (8h/day standard)
-                entity["msdyn_duration"] = Math.Round((decimal)(durationHours / 8.0), 2);
-            }
+                if (mppTask.Duration != null && mppTask.Duration.Value > 0)
+                {
+                    double durationHours = ConvertToHours(mppTask.Duration);
+                    entity["msdyn_duration"] = Math.Round(durationHours / 8.0, 2);
+                }
 
-            if (mppTask.Start.HasValue)
-                entity["msdyn_scheduledstart"] = mppTask.Start.Value;
-
-            if (mppTask.Finish.HasValue)
-                entity["msdyn_scheduledend"] = mppTask.Finish.Value;
-
-            if (mppTask.OutlineLevel > 0)
-                entity["msdyn_outlinelevel"] = mppTask.OutlineLevel;
-
-            if (!string.IsNullOrEmpty(mppTask.WBS))
-                entity["msdyn_wbsid"] = mppTask.WBS;
-
-            if (mppTask.PercentComplete > 0)
-                entity["msdyn_progress"] = (decimal)mppTask.PercentComplete;
-
-            // msdyn_projecttask has a scheduledstart/end that ProjOps uses
-            // Also set effort if we have work data
-            if (mppTask.Work != null && mppTask.Work.Value > 0)
-            {
-                double workHours = ConvertToHours(mppTask.Work);
-                entity["msdyn_effort"] = Math.Round((decimal)workHours, 2);
+                if (mppTask.Work != null && mppTask.Work.Value > 0)
+                {
+                    double workHours = ConvertToHours(mppTask.Work);
+                    entity["msdyn_effort"] = Math.Round(workHours, 2);
+                }
             }
 
             return entity;
+        }
+
+        /// <summary>
+        /// Maps MPP RelationType to Project Operations msdyn_linktype OptionSetValue.
+        /// </summary>
+        private static int MapRelationType(RelationType type)
+        {
+            switch (type)
+            {
+                case RelationType.FinishToStart:  return 192350000;
+                case RelationType.StartToStart:   return 192350001;
+                case RelationType.FinishToFinish: return 192350002;
+                case RelationType.StartToFinish:  return 192350003;
+                default:                          return 192350000; // default FS
+            }
         }
 
         /// <summary>
@@ -182,6 +354,46 @@ namespace ADC.MppImport.Services
                 case TimeUnit.Months: return val * 160.0;
                 default: return val;
             }
+        }
+
+        #endregion
+
+        #region Dataverse Helpers
+
+        /// <summary>
+        /// Retrieves the first existing msdyn_projectbucket for the project, or creates a default one.
+        /// </summary>
+        private EntityReference GetOrCreateDefaultBucket(Guid projectId)
+        {
+            // Try to find an existing bucket for this project
+            var query = new QueryExpression("msdyn_projectbucket")
+            {
+                ColumnSet = new ColumnSet("msdyn_projectbucketid", "msdyn_name"),
+                TopCount = 1,
+                Criteria = new FilterExpression
+                {
+                    Conditions =
+                    {
+                        new ConditionExpression("msdyn_project", ConditionOperator.Equal, projectId)
+                    }
+                }
+            };
+
+            var results = _service.RetrieveMultiple(query);
+            if (results.Entities.Count > 0)
+            {
+                var existing = results.Entities[0];
+                _trace?.Trace("Found existing bucket: {0}", existing.GetAttributeValue<string>("msdyn_name") ?? existing.Id.ToString());
+                return existing.ToEntityReference();
+            }
+
+            // No bucket exists — create a default one
+            _trace?.Trace("No project bucket found, creating default bucket...");
+            var bucket = new Entity("msdyn_projectbucket");
+            bucket["msdyn_project"] = new EntityReference("msdyn_project", projectId);
+            bucket["msdyn_name"] = "MPP Import";
+            Guid bucketId = _service.Create(bucket);
+            return new EntityReference("msdyn_projectbucket", bucketId);
         }
 
         /// <summary>
@@ -235,7 +447,7 @@ namespace ADC.MppImport.Services
         {
             var query = new QueryExpression("msdyn_projecttask")
             {
-                ColumnSet = new ColumnSet("msdyn_msprojectclientid", "msdyn_subject", "msdyn_wbsid"),
+                ColumnSet = new ColumnSet("msdyn_msprojectclientid", "msdyn_subject"),
                 Criteria = new FilterExpression
                 {
                     Conditions =
@@ -267,6 +479,8 @@ namespace ADC.MppImport.Services
 
             return results;
         }
+
+        #endregion
     }
 
     /// <summary>
@@ -276,6 +490,7 @@ namespace ADC.MppImport.Services
     {
         public int TasksCreated { get; set; }
         public int TasksUpdated { get; set; }
+        public int DependenciesCreated { get; set; }
         public int TotalProcessed => TasksCreated + TasksUpdated;
         public List<string> Warnings { get; set; } = new List<string>();
     }

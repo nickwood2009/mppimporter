@@ -33,7 +33,7 @@ namespace ADC.MppImport.Services
 
             // 1. Download the MPP file bytes from the case template file field
             _trace?.Trace("Downloading MPP file from adc_adccasetemplate {0}...", caseTemplateId);
-            byte[] mppBytes = DownloadFileColumn(caseTemplateId, "adc_adccasetemplate", "adc_templatemsprojectmppfile");
+            byte[] mppBytes = DownloadFileColumn(caseTemplateId, "adc_adccasetemplate", "adc_templatefile");
             if (mppBytes == null || mppBytes.Length == 0)
                 throw new InvalidPluginExecutionException("No MPP file found on the case template record.");
 
@@ -143,25 +143,51 @@ namespace ADC.MppImport.Services
             batchNum = ExecuteOpsBatched(taskAndParentOps, projectId, PSS_BATCH_LIMIT_PHASE, "Tasks", batchNum);
 
             // After phase 1 completes, rebuild taskIdMap from actual CRM records.
-            // PSS may assign its own GUIDs rather than honouring our pre-generated ones.
+            // PSS assigns its own GUIDs and doesn't allow msdyn_msprojectclientid on create,
+            // so we match by task name, stamp the client ID via direct SDK Update, then rebuild the map.
             var actualTasks = RetrieveExistingProjectTasks(projectId);
-            var actualTaskIdMap = new Dictionary<int, Guid>();
+            _trace?.Trace("Found {0} tasks in CRM after phase 1", actualTasks.Count);
+
+            // Build name->CRM task lookup (CRM tasks don't have client ID yet)
+            var crmByName = new Dictionary<string, Entity>();
             foreach (var at in actualTasks)
             {
-                string cid = at.GetAttributeValue<string>("msdyn_msprojectclientid");
-                int mppId;
-                if (!string.IsNullOrEmpty(cid) && int.TryParse(cid, out mppId))
-                    actualTaskIdMap[mppId] = at.Id;
+                string name = at.GetAttributeValue<string>("msdyn_subject");
+                if (!string.IsNullOrEmpty(name) && !crmByName.ContainsKey(name))
+                    crmByName[name] = at;
             }
 
-            _trace?.Trace("Verified {0} tasks exist in CRM after phase 1 ({1} were requested)",
-                actualTaskIdMap.Count, taskIdMap.Count);
+            // Match MPP tasks to CRM tasks by name, stamp msdyn_msprojectclientid via direct SDK Update
+            var actualTaskIdMap = new Dictionary<int, Guid>();
+            int stamped = 0;
+            foreach (var mppTask in project.Tasks)
+            {
+                if (!mppTask.UniqueID.HasValue || string.IsNullOrEmpty(mppTask.Name)) continue;
 
-            // Log any tasks that failed to create
+                Entity crmTask;
+                if (!crmByName.TryGetValue(mppTask.Name, out crmTask)) continue;
+
+                actualTaskIdMap[mppTask.UniqueID.Value] = crmTask.Id;
+
+                // Stamp client ID via direct SDK update (PSS doesn't allow it on create)
+                string existingCid = crmTask.GetAttributeValue<string>("msdyn_msprojectclientid");
+                if (string.IsNullOrEmpty(existingCid) || existingCid != mppTask.UniqueID.Value.ToString())
+                {
+                    var stampUpdate = new Entity("msdyn_projecttask", crmTask.Id);
+                    stampUpdate["msdyn_msprojectclientid"] = mppTask.UniqueID.Value.ToString();
+                    _service.Update(stampUpdate);
+                    stamped++;
+                }
+            }
+
+            _trace?.Trace("Mapped {0} tasks by name, stamped msdyn_msprojectclientid on {1} ({2} MPP tasks total)",
+                actualTaskIdMap.Count, stamped, taskIdMap.Count);
+
+            // Log any tasks that failed to map
             foreach (var kvp in taskIdMap)
             {
                 if (!actualTaskIdMap.ContainsKey(kvp.Key))
-                    _trace?.Trace("  WARNING: Task MPP#{0} was NOT created by PSS", kvp.Key);
+                    _trace?.Trace("  WARNING: Task MPP#{0} could not be matched to a CRM task", kvp.Key);
             }
 
             // Phase 2: build dependency ops using actual CRM task GUIDs
@@ -425,10 +451,6 @@ namespace ADC.MppImport.Services
             entity["msdyn_projectbucket"] = bucketRef;
             entity["msdyn_subject"] = mppTask.Name ?? "(Unnamed Task)";
             entity["msdyn_LinkStatus"] = new OptionSetValue(192350000); // Not Linked
-
-            // Store MPP UniqueID so we can map tasks back after PSS assigns its own GUIDs
-            if (mppTask.UniqueID.HasValue)
-                entity["msdyn_msprojectclientid"] = mppTask.UniqueID.Value.ToString();
 
             // Summary tasks (parents): PSS auto-calculates duration/effort from children
             // Only set duration/effort on leaf tasks

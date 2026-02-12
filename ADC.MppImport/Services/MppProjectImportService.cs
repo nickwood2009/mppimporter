@@ -223,6 +223,9 @@ namespace ADC.MppImport.Services
                 {
                     string executeResult = ExecuteOperationSet(operationSetId);
                     _trace?.Trace("Batch {0} executed successfully. Result: {1}", batchNum, executeResult ?? "(none)");
+
+                    // Wait for the operation set to fully complete before moving on
+                    WaitForOperationSetCompletion(operationSetId);
                 }
                 catch (Exception ex)
                 {
@@ -239,6 +242,58 @@ namespace ADC.MppImport.Services
                 start += size;
             }
             return batchNum;
+        }
+
+        /// <summary>
+        /// Polls the msdyn_operationset record until its status indicates completion or failure.
+        /// PSS ExecuteOperationSetV1 is async — records may not be committed immediately.
+        /// </summary>
+        private void WaitForOperationSetCompletion(string operationSetId)
+        {
+            Guid osId;
+            if (!Guid.TryParse(operationSetId, out osId)) return;
+
+            // msdyn_operationset statuses: 0=Open, 1=Completed, 2=Failed, 3=Cancelled (may vary)
+            const int MAX_POLLS = 60;
+            const int POLL_INTERVAL_MS = 2000;
+
+            for (int attempt = 0; attempt < MAX_POLLS; attempt++)
+            {
+                System.Threading.Thread.Sleep(POLL_INTERVAL_MS);
+
+                try
+                {
+                    var osRecord = _service.Retrieve("msdyn_operationset", osId,
+                        new ColumnSet("msdyn_status", "msdyn_description"));
+
+                    var statusValue = osRecord.GetAttributeValue<OptionSetValue>("msdyn_status");
+                    int status = statusValue != null ? statusValue.Value : -1;
+
+                    // 192350001 = Completed, 192350002 = Failed, 192350003 = Cancelled
+                    // Some environments use 1/2/3 instead
+                    if (status == 192350001 || status == 1)
+                    {
+                        _trace?.Trace("OperationSet {0} completed (status={1}) after {2}s", operationSetId, status, (attempt + 1) * POLL_INTERVAL_MS / 1000);
+                        return;
+                    }
+                    else if (status == 192350002 || status == 2 || status == 192350003 || status == 3)
+                    {
+                        _trace?.Trace("OperationSet {0} failed/cancelled (status={1})", operationSetId, status);
+                        throw new InvalidPluginExecutionException(string.Format("OperationSet {0} ended with status {1}", operationSetId, status));
+                    }
+
+                    // Still processing — continue polling
+                    if (attempt % 5 == 4)
+                        _trace?.Trace("  Waiting for OperationSet completion... ({0}s)", (attempt + 1) * POLL_INTERVAL_MS / 1000);
+                }
+                catch (InvalidPluginExecutionException) { throw; }
+                catch (Exception ex)
+                {
+                    _trace?.Trace("  Poll error: {0}", ex.Message);
+                }
+            }
+
+            _trace?.Trace("WARNING: OperationSet {0} did not complete within {1}s — proceeding anyway", operationSetId, MAX_POLLS * POLL_INTERVAL_MS / 1000);
         }
 
         /// <summary>

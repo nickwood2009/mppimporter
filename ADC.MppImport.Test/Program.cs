@@ -61,7 +61,8 @@ namespace ADC.MppImport.Test
                 Console.WriteLine("  3. Import MPP to Dynamics 365 (client secret)");
                 Console.WriteLine("  4. Import MPP to Dynamics 365 (from .env file)");
                 Console.WriteLine("  5. Clear all project tasks (from .env file)");
-                Console.WriteLine("  6. Exit");
+                Console.WriteLine("  6. Clear + Import (from .env file)");
+                Console.WriteLine("  7. Exit");
                 Console.WriteLine("========================================");
                 Console.Write("Select option: ");
 
@@ -84,9 +85,12 @@ namespace ADC.MppImport.Test
                         RunClearProjectTasks();
                         break;
                     case "6":
+                        RunClearAndImport();
+                        break;
+                    case "7":
                         return 0;
                     default:
-                        Console.WriteLine("Invalid option. Please enter 1-6.");
+                        Console.WriteLine("Invalid option. Please enter 1-7.");
                         break;
                 }
             }
@@ -670,7 +674,74 @@ namespace ADC.MppImport.Test
 
         static void RunClearProjectTasks()
         {
-            // Load .env
+            var envData = LoadEnvAndConnect(requireCaseTemplate: false);
+            if (envData == null) return;
+
+            // Confirmation
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine();
+            Console.Write("  Type 'DELETE' to confirm clearing all tasks for project {0}: ", envData.Value.projectId);
+            Console.ResetColor();
+            string confirm = Console.ReadLine()?.Trim();
+            if (confirm != "DELETE")
+            {
+                Console.WriteLine("  Cancelled.");
+                return;
+            }
+
+            DoClearProjectTasks(envData.Value.service, envData.Value.projectId);
+        }
+
+        static void RunClearAndImport()
+        {
+            var envData = LoadEnvAndConnect(requireCaseTemplate: true);
+            if (envData == null) return;
+
+            Console.WriteLine();
+            Console.Write("This will CLEAR all tasks then IMPORT from MPP. Continue? (Y/N): ");
+            string confirm = Console.ReadLine()?.Trim().ToUpper();
+            if (confirm != "Y") { Console.WriteLine("Cancelled."); return; }
+
+            // Step 1: Clear existing tasks
+            DoClearProjectTasks(envData.Value.service, envData.Value.projectId);
+
+            // Step 2: Wait a moment for PSS to finish processing deletes
+            Console.WriteLine();
+            Console.WriteLine("Waiting for clear to complete...");
+            System.Threading.Thread.Sleep(5000);
+
+            // Step 3: Import
+            Console.WriteLine("Starting import...");
+            var trace = new ConsoleTracingService();
+            var importService = new MppProjectImportService(envData.Value.service, trace);
+            try
+            {
+                var result = importService.Execute(envData.Value.caseTemplateId, envData.Value.projectId);
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine();
+                Console.WriteLine("=== IMPORT COMPLETE ===");
+                Console.WriteLine("  Tasks created:  {0}", result.TasksCreated);
+                Console.WriteLine("  Tasks updated:  {0}", result.TasksUpdated);
+                Console.WriteLine("  Dependencies:   {0}", result.DependenciesCreated);
+                Console.ResetColor();
+            }
+            catch (Exception ex)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine();
+                Console.WriteLine("=== IMPORT FAILED ===");
+                Console.WriteLine(ex.Message);
+                Console.ResetColor();
+            }
+        }
+
+        /// <summary>
+        /// Loads .env, connects to CRM, and returns the connection info.
+        /// Returns null if any required value is missing or connection fails.
+        /// </summary>
+        static (IOrganizationService service, Guid projectId, Guid caseTemplateId)?
+            LoadEnvAndConnect(bool requireCaseTemplate)
+        {
             string exeDir = AppDomain.CurrentDomain.BaseDirectory;
             string envPath = FindEnvFile(exeDir);
             if (envPath == null)
@@ -678,17 +749,24 @@ namespace ADC.MppImport.Test
                 Console.WriteLine();
                 Console.WriteLine("ERROR: .env file not found.");
                 Console.WriteLine("Copy .env.example to .env and fill in your values.");
-                return;
+                return null;
             }
 
             var env = ParseEnvFile(envPath);
 
             string crmUrl = GetEnv(env, "CRM_URL");
-            if (crmUrl == null) { Console.WriteLine("ERROR: CRM_URL not set in .env"); return; }
+            if (crmUrl == null) { Console.WriteLine("ERROR: CRM_URL not set in .env"); return null; }
             crmUrl = crmUrl.TrimEnd('/');
 
             Guid projectId = GetEnvGuid(env, "PROJECT_ID");
-            if (projectId == Guid.Empty) return;
+            if (projectId == Guid.Empty) return null;
+
+            Guid caseTemplateId = Guid.Empty;
+            if (requireCaseTemplate)
+            {
+                caseTemplateId = GetEnvGuid(env, "CASE_TEMPLATE_ID");
+                if (caseTemplateId == Guid.Empty) return null;
+            }
 
             // Connect to CRM
             IOrganizationService service = null;
@@ -702,7 +780,7 @@ namespace ADC.MppImport.Test
                     if (clientId == null || clientSecret == null)
                     {
                         Console.WriteLine("ERROR: CLIENT_ID and CLIENT_SECRET required in .env for ClientSecret auth.");
-                        return;
+                        return null;
                     }
                     Console.WriteLine("Connecting to Dynamics 365 (client secret)...");
                     service = ConnectToCrmS2S(crmUrl, clientId, clientSecret);
@@ -719,10 +797,18 @@ namespace ADC.MppImport.Test
             catch (Exception ex)
             {
                 Console.WriteLine("ERROR: Failed to connect: {0}", ex.Message);
-                return;
+                return null;
             }
 
-            // Count existing tasks and dependencies
+            return (service, projectId, caseTemplateId);
+        }
+
+        /// <summary>
+        /// Deletes all tasks and dependencies for the given project via PSS.
+        /// Can be called standalone or as part of clear+import.
+        /// </summary>
+        static void DoClearProjectTasks(IOrganizationService service, Guid projectId)
+        {
             Console.WriteLine();
             Console.WriteLine("Querying project tasks for project {0}...", projectId);
 
@@ -783,20 +869,6 @@ namespace ADC.MppImport.Test
             if (allTasks.Count == 0 && allDeps.Count == 0)
             {
                 Console.WriteLine("  Nothing to delete.");
-                return;
-            }
-
-            // Confirmation
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine();
-            Console.WriteLine("  WARNING: This will permanently delete ALL {0} tasks and {1} dependencies", allTasks.Count, allDeps.Count);
-            Console.WriteLine("  for project {0}.", projectId);
-            Console.ResetColor();
-            Console.Write("  Type 'DELETE' to confirm: ");
-            string confirm = Console.ReadLine()?.Trim();
-            if (confirm != "DELETE")
-            {
-                Console.WriteLine("  Cancelled.");
                 return;
             }
 

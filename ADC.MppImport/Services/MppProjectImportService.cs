@@ -426,6 +426,10 @@ namespace ADC.MppImport.Services
             entity["msdyn_subject"] = mppTask.Name ?? "(Unnamed Task)";
             entity["msdyn_LinkStatus"] = new OptionSetValue(192350000); // Not Linked
 
+            // Store MPP UniqueID so we can map tasks back after PSS assigns its own GUIDs
+            if (mppTask.UniqueID.HasValue)
+                entity["msdyn_msprojectclientid"] = mppTask.UniqueID.Value.ToString();
+
             // Summary tasks (parents): PSS auto-calculates duration/effort from children
             // Only set duration/effort on leaf tasks
             if (!mppTask.HasChildTasks)

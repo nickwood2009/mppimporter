@@ -130,31 +130,49 @@ namespace ADC.MppImport.Services
             _trace?.Trace("Parent links queued: {0}", parentLinksSet);
 
             // 9. Third pass: create predecessor/successor dependency records
+            //    First check if the MPP file has explicit predecessor relationships
+            int totalMppPredecessors = 0;
+            foreach (var t in project.Tasks)
+                totalMppPredecessors += (t.Predecessors != null ? t.Predecessors.Count : 0);
+
             int dependenciesCreated = 0;
-            foreach (var mppTask in project.Tasks)
+
+            if (totalMppPredecessors > 0)
             {
-                if (!mppTask.UniqueID.HasValue) continue;
-                if (mppTask.Predecessors == null || mppTask.Predecessors.Count == 0) continue;
-
-                Guid successorId;
-                if (!taskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
-
-                foreach (var relation in mppTask.Predecessors)
+                // Use explicit MPP predecessor data
+                _trace?.Trace("MPP has {0} explicit predecessor relationships, using those.", totalMppPredecessors);
+                foreach (var mppTask in project.Tasks)
                 {
-                    Guid predecessorId;
-                    if (!taskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
+                    if (!mppTask.UniqueID.HasValue) continue;
+                    if (mppTask.Predecessors == null || mppTask.Predecessors.Count == 0) continue;
 
-                    var dep = new Entity("msdyn_projecttaskdependency");
-                    dep.Id = Guid.NewGuid();
-                    dep["msdyn_projecttaskdependencyid"] = dep.Id;
-                    dep["msdyn_project"] = projectRef;
-                    dep["msdyn_predecessortask"] = new EntityReference("msdyn_projecttask", predecessorId);
-                    dep["msdyn_successortask"] = new EntityReference("msdyn_projecttask", successorId);
-                    dep["msdyn_linktype"] = new OptionSetValue(MapRelationType(relation.Type));
+                    Guid successorId;
+                    if (!taskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
 
-                    PssCreate(dep, operationSetId);
-                    dependenciesCreated++;
+                    foreach (var relation in mppTask.Predecessors)
+                    {
+                        Guid predecessorId;
+                        if (!taskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
+
+                        var dep = new Entity("msdyn_projecttaskdependency");
+                        dep.Id = Guid.NewGuid();
+                        dep["msdyn_projecttaskdependencyid"] = dep.Id;
+                        dep["msdyn_project"] = projectRef;
+                        dep["msdyn_predecessortask"] = new EntityReference("msdyn_projecttask", predecessorId);
+                        dep["msdyn_successortask"] = new EntityReference("msdyn_projecttask", successorId);
+                        dep["msdyn_linktype"] = new OptionSetValue(MapRelationType(relation.Type));
+
+                        PssCreate(dep, operationSetId);
+                        dependenciesCreated++;
+                    }
                 }
+            }
+            else
+            {
+                // No explicit predecessors — auto-create sequential Finish-to-Start dependencies
+                // between consecutive sibling tasks within each parent group
+                _trace?.Trace("MPP has no predecessor relationships. Auto-creating sequential FS dependencies.");
+                dependenciesCreated = CreateAutoSequentialDependencies(project, projectRef, taskIdMap, operationSetId);
             }
 
             _trace?.Trace("Dependencies queued: {0}", dependenciesCreated);
@@ -322,6 +340,66 @@ namespace ADC.MppImport.Services
             }
 
             return entity;
+        }
+
+        /// <summary>
+        /// Auto-creates sequential Finish-to-Start dependencies between consecutive sibling tasks.
+        /// Groups tasks by their parent and chains each task to the next within that group.
+        /// Also chains top-level summary groups sequentially.
+        /// </summary>
+        private int CreateAutoSequentialDependencies(ProjectFile project, EntityReference projectRef,
+            Dictionary<int, Guid> taskIdMap, string operationSetId)
+        {
+            int count = 0;
+
+            // Group tasks by parent UniqueID (null parent = top-level)
+            var childrenByParent = new Dictionary<int, List<Task>>();
+            foreach (var mppTask in project.Tasks)
+            {
+                if (!mppTask.UniqueID.HasValue) continue;
+                if (!taskIdMap.ContainsKey(mppTask.UniqueID.Value)) continue;
+
+                int parentKey = (mppTask.ParentTask != null && mppTask.ParentTask.UniqueID.HasValue)
+                    ? mppTask.ParentTask.UniqueID.Value
+                    : -1; // top-level
+
+                if (!childrenByParent.ContainsKey(parentKey))
+                    childrenByParent[parentKey] = new List<Task>();
+                childrenByParent[parentKey].Add(mppTask);
+            }
+
+            // For each group of siblings, create FS dependencies between consecutive tasks
+            foreach (var kvp in childrenByParent)
+            {
+                var siblings = kvp.Value;
+                for (int i = 1; i < siblings.Count; i++)
+                {
+                    var prevTask = siblings[i - 1];
+                    var currTask = siblings[i];
+
+                    if (!prevTask.UniqueID.HasValue || !currTask.UniqueID.HasValue) continue;
+
+                    Guid predecessorId, successorId;
+                    if (!taskIdMap.TryGetValue(prevTask.UniqueID.Value, out predecessorId)) continue;
+                    if (!taskIdMap.TryGetValue(currTask.UniqueID.Value, out successorId)) continue;
+
+                    var dep = new Entity("msdyn_projecttaskdependency");
+                    dep.Id = Guid.NewGuid();
+                    dep["msdyn_projecttaskdependencyid"] = dep.Id;
+                    dep["msdyn_project"] = projectRef;
+                    dep["msdyn_predecessortask"] = new EntityReference("msdyn_projecttask", predecessorId);
+                    dep["msdyn_successortask"] = new EntityReference("msdyn_projecttask", successorId);
+                    dep["msdyn_linktype"] = new OptionSetValue(192350000); // Finish-to-Start
+
+                    PssCreate(dep, operationSetId);
+                    count++;
+
+                    _trace?.Trace("    FS: [{0}] {1} -> [{2}] {3}",
+                        prevTask.UniqueID, prevTask.Name, currTask.UniqueID, currTask.Name);
+                }
+            }
+
+            return count;
         }
 
         /// <summary>

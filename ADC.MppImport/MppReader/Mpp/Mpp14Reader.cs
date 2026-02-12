@@ -608,60 +608,106 @@ namespace ADC.MppImport.MppReader.Mpp
             try
             {
                 CFStorage linkDir = MppFileReader.GetStorage(m_projectDir, "TBkndLink");
-                if (linkDir == null) return;
+                bool useCons = false;
 
-                byte[] linkFixedMetaData = MppFileReader.GetStreamData(linkDir, "FixedMeta");
-                byte[] linkFixedDataBuf = MppFileReader.GetStreamData(linkDir, "FixedData");
-
-                if (linkFixedMetaData == null || linkFixedDataBuf == null) return;
-
-                var linkFixedMeta = new FixedMeta(linkFixedMetaData, 13);
-                var linkFixedData = new FixedData(linkFixedMeta, linkFixedDataBuf);
-
-                int itemCount = linkFixedMeta.AdjustedItemCount;
-
-                for (int loop = 0; loop < itemCount; loop++)
+                if (linkDir == null)
                 {
-                    byte[] data = linkFixedData.GetByteArrayValue(loop);
-                    if (data == null || data.Length < 16) continue;
+                    // Newer MPP formats store links in TBkndCons instead of TBkndLink
+                    linkDir = MppFileReader.GetStorage(m_projectDir, "TBkndCons");
+                    useCons = true;
+                    if (linkDir == null) return;
+                }
 
-                    byte[] metaData = linkFixedMeta.GetByteArrayValue(loop);
-                    if (metaData == null) continue;
+                byte[] linkFixedDataBuf = MppFileReader.GetStreamData(linkDir, "FixedData");
+                if (linkFixedDataBuf == null || linkFixedDataBuf.Length < 16) return;
 
-                    int flags = ByteArrayHelper.GetInt(metaData, 0);
-                    if ((flags & 0x02) != 0) continue;
+                int relationsFound = 0;
 
-                    int sourceTaskUniqueID = ByteArrayHelper.GetInt(data, 4);
-                    int targetTaskUniqueID = ByteArrayHelper.GetInt(data, 8);
-                    int relationType = ByteArrayHelper.GetShort(data, 12);
-                    int lagDuration = data.Length > 16 ? ByteArrayHelper.GetInt(data, 14) : 0;
+                if (useCons)
+                {
+                    // TBkndCons format: packed 20-byte records in raw FixedData buffer
+                    const int RECORD_SIZE = 20;
+                    int recordCount = linkFixedDataBuf.Length / RECORD_SIZE;
 
-                    if (sourceTaskUniqueID < 1 || targetTaskUniqueID < 1) continue;
-
-                    var relation = new Relation();
-                    relation.SourceTaskUniqueID = sourceTaskUniqueID;
-                    relation.TargetTaskUniqueID = targetTaskUniqueID;
-
-                    if (relationType >= 0 && relationType <= 3)
-                        relation.Type = (RelationType)relationType;
-
-                    if (lagDuration != 0)
+                    for (int i = 0; i < recordCount; i++)
                     {
-                        var du = m_file.ProjectProperties.DefaultDurationUnits;
-                        relation.Lag = MppUtility.GetAdjustedDuration(m_file.ProjectProperties, lagDuration, du);
+                        int offset = i * RECORD_SIZE;
+                        if (offset + 16 > linkFixedDataBuf.Length) break;
+
+                        int sourceTaskUniqueID = ByteArrayHelper.GetInt(linkFixedDataBuf, offset + 4);
+                        int targetTaskUniqueID = ByteArrayHelper.GetInt(linkFixedDataBuf, offset + 8);
+                        int relationType = ByteArrayHelper.GetShort(linkFixedDataBuf, offset + 12);
+                        int lagDuration = (offset + 18 <= linkFixedDataBuf.Length)
+                            ? ByteArrayHelper.GetInt(linkFixedDataBuf, offset + 14) : 0;
+
+                        if (sourceTaskUniqueID < 1 || targetTaskUniqueID < 1) continue;
+                        if (sourceTaskUniqueID == targetTaskUniqueID) continue;
+                        if (relationType < 0 || relationType > 3) continue;
+
+                        AddRelation(sourceTaskUniqueID, targetTaskUniqueID, relationType, lagDuration);
+                        relationsFound++;
                     }
+                }
+                else
+                {
+                    // TBkndLink format: records split by FixedMeta
+                    byte[] linkFixedMetaData = MppFileReader.GetStreamData(linkDir, "FixedMeta");
+                    if (linkFixedMetaData == null) return;
 
-                    var sourceTask = m_file.Tasks.FirstOrDefault(t => t.UniqueID == sourceTaskUniqueID);
-                    if (sourceTask != null) sourceTask.Successors.Add(relation);
+                    var linkFixedMeta = new FixedMeta(linkFixedMetaData, 13);
+                    var linkFixedData = new FixedData(linkFixedMeta, linkFixedDataBuf);
+                    int itemCount = linkFixedMeta.AdjustedItemCount;
 
-                    var targetTask = m_file.Tasks.FirstOrDefault(t => t.UniqueID == targetTaskUniqueID);
-                    if (targetTask != null) targetTask.Predecessors.Add(relation);
+                    for (int loop = 0; loop < itemCount; loop++)
+                    {
+                        byte[] data = linkFixedData.GetByteArrayValue(loop);
+                        if (data == null || data.Length < 16) continue;
+
+                        byte[] metaData = linkFixedMeta.GetByteArrayValue(loop);
+                        if (metaData == null) continue;
+
+                        int flags = ByteArrayHelper.GetInt(metaData, 0);
+                        if ((flags & 0x02) != 0) continue;
+
+                        int sourceTaskUniqueID = ByteArrayHelper.GetInt(data, 4);
+                        int targetTaskUniqueID = ByteArrayHelper.GetInt(data, 8);
+                        int relationType = ByteArrayHelper.GetShort(data, 12);
+                        int lagDuration = data.Length > 16 ? ByteArrayHelper.GetInt(data, 14) : 0;
+
+                        if (sourceTaskUniqueID < 1 || targetTaskUniqueID < 1) continue;
+                        if (relationType < 0 || relationType > 3) continue;
+
+                        AddRelation(sourceTaskUniqueID, targetTaskUniqueID, relationType, lagDuration);
+                        relationsFound++;
+                    }
                 }
             }
             catch (Exception ex)
             {
                 m_file.AddIgnoredError(ex);
             }
+        }
+
+        private void AddRelation(int sourceTaskUniqueID, int targetTaskUniqueID, int relationType, int lagDuration)
+        {
+            var relation = new Relation();
+            relation.SourceTaskUniqueID = sourceTaskUniqueID;
+            relation.TargetTaskUniqueID = targetTaskUniqueID;
+
+            if (relationType >= 0 && relationType <= 3)
+                relation.Type = (RelationType)relationType;
+
+            if (lagDuration != 0)
+            {
+                var du = m_file.ProjectProperties.DefaultDurationUnits;
+                relation.Lag = MppUtility.GetAdjustedDuration(m_file.ProjectProperties, lagDuration, du);
+            }
+
+            var sourceTask = m_file.Tasks.FirstOrDefault(t => t.UniqueID == sourceTaskUniqueID);
+            if (sourceTask != null) sourceTask.Successors.Add(relation);
+
+            var targetTask = m_file.Tasks.FirstOrDefault(t => t.UniqueID == targetTaskUniqueID);
+            if (targetTask != null) targetTask.Predecessors.Add(relation);
         }
 
         #endregion

@@ -70,8 +70,8 @@ namespace ADC.MppImport.MppReader.Model
 
     public enum RelationType
     {
-        FinishToStart = 0,
-        FinishToFinish = 1,
+        FinishToFinish = 0,
+        FinishToStart = 1,
         StartToFinish = 2,
         StartToStart = 3
     }

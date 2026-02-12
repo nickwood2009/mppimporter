@@ -178,29 +178,46 @@ namespace ADC.MppImport.Services
             result.DependenciesCreated = depOps.Count;
             _trace?.Trace("Dependencies queued: {0}", depOps.Count);
 
-            // 7. Execute operations in batches of up to PSS_BATCH_LIMIT
-            //    Merge all operations into a single list, preserving order (creates -> parents -> deps)
-            var allOps = new List<Action<string>>();
-            allOps.AddRange(taskOps);
-            allOps.AddRange(parentOps);
-            allOps.AddRange(depOps);
-
-            int totalOps = allOps.Count;
-            int batchStart = 0;
+            // 7. Execute in two phases to ensure tasks exist before dependencies reference them.
+            //    Phase 1: task creates/updates + parent links
+            //    Phase 2: dependency records
             int batchNum = 0;
 
-            while (batchStart < totalOps)
+            // Phase 1: tasks + parent links (batched if > 200)
+            var taskAndParentOps = new List<Action<string>>();
+            taskAndParentOps.AddRange(taskOps);
+            taskAndParentOps.AddRange(parentOps);
+
+            batchNum = ExecuteOpsBatched(taskAndParentOps, projectId, PSS_BATCH_LIMIT, "Tasks", batchNum);
+
+            // Phase 2: dependencies (batched if > 200)
+            if (depOps.Count > 0)
+                batchNum = ExecuteOpsBatched(depOps, projectId, PSS_BATCH_LIMIT, "Dependencies", batchNum);
+
+            _trace?.Trace("Import complete. {0} batches, Created: {1}, Updated: {2}, Dependencies: {3}",
+                batchNum, result.TasksCreated, result.TasksUpdated, result.DependenciesCreated);
+            return result;
+        }
+
+        #region PSS API Helpers
+
+        /// <summary>
+        /// Executes a list of deferred PSS operations in batches of up to <paramref name="batchLimit"/>.
+        /// Returns the updated batch number.
+        /// </summary>
+        private int ExecuteOpsBatched(List<Action<string>> ops, Guid projectId, int batchLimit, string phase, int batchNum)
+        {
+            int start = 0;
+            while (start < ops.Count)
             {
-                int batchSize = Math.Min(PSS_BATCH_LIMIT, totalOps - batchStart);
+                int size = Math.Min(batchLimit, ops.Count - start);
                 batchNum++;
 
-                string operationSetId = CreateOperationSet(projectId, string.Format("MPP Import Batch {0}", batchNum));
-                _trace?.Trace("OperationSet batch {0} created: {1} ({2} ops)", batchNum, operationSetId, batchSize);
+                string operationSetId = CreateOperationSet(projectId, string.Format("MPP Import {0} Batch {1}", phase, batchNum));
+                _trace?.Trace("OperationSet {0} batch {1} created: {2} ({3} ops)", phase, batchNum, operationSetId, size);
 
-                for (int i = batchStart; i < batchStart + batchSize; i++)
-                {
-                    allOps[i](operationSetId);
-                }
+                for (int i = start; i < start + size; i++)
+                    ops[i](operationSetId);
 
                 try
                 {
@@ -209,7 +226,7 @@ namespace ADC.MppImport.Services
                 }
                 catch (Exception ex)
                 {
-                    _trace?.Trace("Batch {0} execution failed: {1}", batchNum, ex.Message);
+                    _trace?.Trace("Batch {0} ({1}) execution failed: {2}", batchNum, phase, ex.Message);
                     if (ex.InnerException != null)
                         _trace?.Trace("Inner: {0}", ex.InnerException.Message);
 
@@ -219,15 +236,10 @@ namespace ADC.MppImport.Services
                     throw;
                 }
 
-                batchStart += batchSize;
+                start += size;
             }
-
-            _trace?.Trace("Import complete. {0} batches, Created: {1}, Updated: {2}, Dependencies: {3}",
-                batchNum, result.TasksCreated, result.TasksUpdated, result.DependenciesCreated);
-            return result;
+            return batchNum;
         }
-
-        #region PSS API Helpers
 
         /// <summary>
         /// Calls msdyn_CreateOperationSetV1 to create a new operation set for batching PSS operations.

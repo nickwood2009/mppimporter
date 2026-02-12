@@ -145,27 +145,52 @@ namespace ADC.MppImport.Services
             // Phase 2: PSS does NOT honour pre-generated GUIDs across operation sets.
             // Wait for CRM records to become queryable, then rebuild the ID map by matching on msdyn_subject.
             _trace?.Trace("Waiting 10s for CRM records to become queryable...");
+            _trace?.Trace("ProjectId for query: {0}", projectId);
             System.Threading.Thread.Sleep(10000);
 
+            // Diagnostic: try direct Retrieve on first pre-generated GUID
+            if (taskIdMap.Count > 0)
+            {
+                var firstEntry = taskIdMap.First();
+                _trace?.Trace("Checking if pre-gen GUID exists: {0}", firstEntry.Value);
+                try
+                {
+                    var probe = _service.Retrieve("msdyn_projecttask", firstEntry.Value,
+                        new ColumnSet("msdyn_subject", "msdyn_project"));
+                    _trace?.Trace("  Direct Retrieve FOUND: '{0}', project={1}",
+                        probe.GetAttributeValue<string>("msdyn_subject") ?? "(null)",
+                        probe.Contains("msdyn_project") ? ((EntityReference)probe["msdyn_project"]).Id.ToString() : "(null)");
+                }
+                catch (Exception ex)
+                {
+                    _trace?.Trace("  Direct Retrieve FAILED: {0}", ex.Message);
+                }
+            }
+
+            // Diagnostic: query ALL project tasks (no project filter) to see total count
+            try
+            {
+                var allTasksQuery = new QueryExpression("msdyn_projecttask")
+                {
+                    ColumnSet = new ColumnSet("msdyn_subject", "msdyn_project"),
+                    TopCount = 5
+                };
+                var allTasksResult = _service.RetrieveMultiple(allTasksQuery);
+                _trace?.Trace("Total msdyn_projecttask in CRM (top 5): {0}", allTasksResult.Entities.Count);
+                foreach (var t in allTasksResult.Entities)
+                {
+                    var proj = t.Contains("msdyn_project") ? ((EntityReference)t["msdyn_project"]).Id.ToString() : "(null)";
+                    _trace?.Trace("  Task '{0}' project={1} id={2}",
+                        t.GetAttributeValue<string>("msdyn_subject") ?? "(null)", proj, t.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                _trace?.Trace("Diagnostic all-tasks query failed: {0}", ex.Message);
+            }
+
             var crmTasks = RetrieveExistingProjectTasks(projectId);
-            _trace?.Trace("CRM tasks after phase 1: {0}", crmTasks.Count);
-
-            // Log first 10 CRM task names for diagnostics
-            int logCount = 0;
-            foreach (var ct in crmTasks)
-            {
-                if (logCount++ < 10)
-                    _trace?.Trace("  CRM task: '{0}' (id={1})",
-                        ct.GetAttributeValue<string>("msdyn_subject") ?? "(null)", ct.Id);
-            }
-
-            // Also log first 10 MPP task names
-            logCount = 0;
-            foreach (var mt in project.Tasks)
-            {
-                if (logCount++ < 10)
-                    _trace?.Trace("  MPP task: '{0}' (uid={1})", mt.Name ?? "(null)", mt.UniqueID);
-            }
+            _trace?.Trace("CRM tasks after phase 1 (filtered by project {0}): {1}", projectId, crmTasks.Count);
 
             var crmTaskIdMap = new Dictionary<int, Guid>();
             // Build name -> CRM GUID lookup

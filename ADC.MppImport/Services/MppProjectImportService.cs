@@ -142,8 +142,72 @@ namespace ADC.MppImport.Services
 
             batchNum = ExecuteOpsBatched(taskAndParentOps, projectId, PSS_BATCH_LIMIT_PHASE, "Tasks", batchNum);
 
-            // Phase 2: build dependency ops using pre-generated taskIdMap GUIDs.
-            // Polling ensures tasks are committed before we reference them in dependencies.
+            // Phase 2: PSS does NOT honour pre-generated GUIDs across operation sets.
+            // Wait for CRM records to become queryable, then rebuild the ID map by matching on msdyn_subject.
+            _trace?.Trace("Waiting 10s for CRM records to become queryable...");
+            System.Threading.Thread.Sleep(10000);
+
+            var crmTasks = RetrieveExistingProjectTasks(projectId);
+            _trace?.Trace("CRM tasks after phase 1: {0}", crmTasks.Count);
+
+            // Log first 10 CRM task names for diagnostics
+            int logCount = 0;
+            foreach (var ct in crmTasks)
+            {
+                if (logCount++ < 10)
+                    _trace?.Trace("  CRM task: '{0}' (id={1})",
+                        ct.GetAttributeValue<string>("msdyn_subject") ?? "(null)", ct.Id);
+            }
+
+            // Also log first 10 MPP task names
+            logCount = 0;
+            foreach (var mt in project.Tasks)
+            {
+                if (logCount++ < 10)
+                    _trace?.Trace("  MPP task: '{0}' (uid={1})", mt.Name ?? "(null)", mt.UniqueID);
+            }
+
+            var crmTaskIdMap = new Dictionary<int, Guid>();
+            // Build name -> CRM GUID lookup
+            var crmByName = new Dictionary<string, List<Entity>>();
+            foreach (var ct in crmTasks)
+            {
+                string name = ct.GetAttributeValue<string>("msdyn_subject");
+                if (string.IsNullOrEmpty(name)) continue;
+                if (!crmByName.ContainsKey(name))
+                    crmByName[name] = new List<Entity>();
+                crmByName[name].Add(ct);
+            }
+
+            // Match MPP tasks to CRM tasks by name
+            foreach (var mppTask in project.Tasks)
+            {
+                if (!mppTask.UniqueID.HasValue || string.IsNullOrEmpty(mppTask.Name)) continue;
+
+                List<Entity> matches;
+                if (!crmByName.TryGetValue(mppTask.Name, out matches) || matches.Count == 0) continue;
+
+                crmTaskIdMap[mppTask.UniqueID.Value] = matches[0].Id;
+                if (matches.Count > 1)
+                {
+                    _trace?.Trace("  NOTE: Duplicate task name '{0}', using first of {1}", mppTask.Name, matches.Count);
+                    matches.RemoveAt(0);
+                }
+            }
+
+            _trace?.Trace("Matched {0} of {1} MPP tasks to CRM records by name", crmTaskIdMap.Count, taskIdMap.Count);
+
+            // Log unmatched tasks
+            foreach (var kvp in taskIdMap)
+            {
+                if (!crmTaskIdMap.ContainsKey(kvp.Key))
+                {
+                    var mppTask = project.Tasks.FirstOrDefault(t => t.UniqueID.HasValue && t.UniqueID.Value == kvp.Key);
+                    _trace?.Trace("  UNMATCHED: MPP#{0} '{1}'", kvp.Key, mppTask != null ? mppTask.Name : "?");
+                }
+            }
+
+            // Build dependency ops using actual CRM GUIDs
             int totalMppPredecessors = 0;
             foreach (var t in project.Tasks)
                 totalMppPredecessors += (t.Predecessors != null ? t.Predecessors.Count : 0);
@@ -159,12 +223,12 @@ namespace ADC.MppImport.Services
                     if (mppTask.Predecessors == null || mppTask.Predecessors.Count == 0) continue;
 
                     Guid successorId;
-                    if (!taskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
+                    if (!crmTaskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
 
                     foreach (var relation in mppTask.Predecessors)
                     {
                         Guid predecessorId;
-                        if (!taskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
+                        if (!crmTaskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
 
                         var dep = new Entity("msdyn_projecttaskdependency");
                         dep.Id = Guid.NewGuid();
@@ -181,7 +245,7 @@ namespace ADC.MppImport.Services
             else
             {
                 _trace?.Trace("MPP has no predecessor relationships. Auto-creating sequential FS dependencies.");
-                depOps = BuildAutoSequentialDependencyOps(project, projectRef, taskIdMap);
+                depOps = BuildAutoSequentialDependencyOps(project, projectRef, crmTaskIdMap);
             }
 
             result.DependenciesCreated = depOps.Count;

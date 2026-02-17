@@ -155,18 +155,34 @@ namespace ADC.MppImport.Services
             var crmTasks = RetrieveExistingProjectTasks(projectId);
             _trace?.Trace("CRM tasks after Phase 1: {0}", crmTasks.Count);
 
-            // Rebuild taskIdMap using msdyn_msprojectclientid -> actual CRM GUID
-            var actualTaskIdMap = new Dictionary<int, Guid>();
+            // Rebuild taskIdMap by matching msdyn_subject (task name) to MPP task name
+            var crmTasksByName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
             foreach (var crmTask in crmTasks)
             {
-                string clientId = crmTask.GetAttributeValue<string>("msdyn_msprojectclientid");
-                int mppUniqueId;
-                if (!string.IsNullOrEmpty(clientId) && int.TryParse(clientId, out mppUniqueId))
+                string name = crmTask.GetAttributeValue<string>("msdyn_subject");
+                if (!string.IsNullOrEmpty(name) && !crmTasksByName.ContainsKey(name))
+                    crmTasksByName[name] = crmTask.Id;
+            }
+
+            var actualTaskIdMap = new Dictionary<int, Guid>();
+            int matched = 0, unmatched = 0;
+            foreach (var mppTask in project.Tasks)
+            {
+                if (!mppTask.UniqueID.HasValue) continue;
+                string name = mppTask.Name ?? "(Unnamed Task)";
+                Guid crmId;
+                if (crmTasksByName.TryGetValue(name, out crmId))
                 {
-                    actualTaskIdMap[mppUniqueId] = crmTask.Id;
+                    actualTaskIdMap[mppTask.UniqueID.Value] = crmId;
+                    matched++;
+                }
+                else
+                {
+                    unmatched++;
+                    _trace?.Trace("  WARNING: No CRM match for MPP task [{0}] '{1}'", mppTask.UniqueID.Value, name);
                 }
             }
-            _trace?.Trace("Mapped {0} CRM tasks back to MPP IDs (of {1} MPP tasks)", actualTaskIdMap.Count, taskIdMap.Count);
+            _trace?.Trace("Task name matching: {0} matched, {1} unmatched (of {2} CRM tasks)", matched, unmatched, crmTasks.Count);
 
             // Build dependency ops using actual CRM GUIDs
             int totalMppPredecessors = 0;
@@ -461,8 +477,6 @@ namespace ADC.MppImport.Services
             entity["msdyn_project"] = projectRef;
             entity["msdyn_projectbucket"] = bucketRef;
             entity["msdyn_subject"] = mppTask.Name ?? "(Unnamed Task)";
-            if (mppTask.UniqueID.HasValue)
-                entity["msdyn_msprojectclientid"] = mppTask.UniqueID.Value.ToString();
             entity["msdyn_LinkStatus"] = new OptionSetValue(192350000); // Not Linked
 
             // Summary tasks (parents): PSS auto-calculates duration/effort from children

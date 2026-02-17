@@ -216,6 +216,8 @@ namespace ADC.MppImport.Services
                 totalMppPredecessors += (t.Predecessors != null ? t.Predecessors.Count : 0);
 
             var depOps = new List<Action<string>>();
+            var seenLinks = new HashSet<string>(); // deduplicate predecessor-successor pairs
+            int duplicatesSkipped = 0;
 
             if (totalMppPredecessors > 0)
             {
@@ -233,6 +235,14 @@ namespace ADC.MppImport.Services
                         Guid predecessorId;
                         if (!actualTaskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
 
+                        // Deduplicate: skip if we've already created this exact link
+                        string linkKey = string.Format("{0}|{1}", predecessorId, successorId);
+                        if (!seenLinks.Add(linkKey))
+                        {
+                            duplicatesSkipped++;
+                            continue;
+                        }
+
                         var dep = new Entity("msdyn_projecttaskdependency");
                         dep.Id = Guid.NewGuid();
                         dep["msdyn_projecttaskdependencyid"] = dep.Id;
@@ -244,6 +254,8 @@ namespace ADC.MppImport.Services
                         depOps.Add(osId => PssCreate(capturedDep, osId));
                     }
                 }
+                if (duplicatesSkipped > 0)
+                    _trace?.Trace("Skipped {0} duplicate dependency links", duplicatesSkipped);
             }
             else
             {

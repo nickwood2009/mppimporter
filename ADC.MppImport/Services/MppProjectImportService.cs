@@ -56,11 +56,11 @@ namespace ADC.MppImport.Services
             _trace?.Trace("Existing msdyn_projecttask records: {0}", existingTasks.Count);
 
             // If no existing tasks, the project may have just been created (e.g. by a workflow).
-            // PSS needs time to initialise the project before accepting operations.
+            // PSS needs time to initialise the project (create root task etc.) before accepting operations.
             if (existingTasks.Count == 0)
             {
-                _trace?.Trace("New project detected — waiting 15s for PSS initialisation...");
-                System.Threading.Thread.Sleep(15000);
+                _trace?.Trace("New project detected — polling for PSS initialisation (root task)...");
+                WaitForProjectReady(projectId);
             }
 
             // 4. Build a lookup of existing tasks by msdyn_msprojectclientid
@@ -253,6 +253,52 @@ namespace ADC.MppImport.Services
         }
 
         /// <summary>
+        /// Waits for PSS to finish initialising a newly created project by polling for the root task.
+        /// PSS creates a root msdyn_projecttask automatically; until it exists, operations will fail with ProjectNotFound.
+        /// </summary>
+        private void WaitForProjectReady(Guid projectId)
+        {
+            const int MAX_POLLS = 20;
+            const int POLL_INTERVAL_MS = 3000; // 3s × 20 = 60s max
+
+            for (int attempt = 0; attempt < MAX_POLLS; attempt++)
+            {
+                System.Threading.Thread.Sleep(POLL_INTERVAL_MS);
+
+                try
+                {
+                    var query = new QueryExpression("msdyn_projecttask")
+                    {
+                        ColumnSet = new ColumnSet("msdyn_subject"),
+                        TopCount = 1,
+                        Criteria = new FilterExpression
+                        {
+                            Conditions =
+                            {
+                                new ConditionExpression("msdyn_project", ConditionOperator.Equal, projectId)
+                            }
+                        }
+                    };
+                    var result = _service.RetrieveMultiple(query);
+                    if (result.Entities.Count > 0)
+                    {
+                        _trace?.Trace("PSS project ready (root task found) after {0}s", (attempt + 1) * POLL_INTERVAL_MS / 1000);
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _trace?.Trace("  Project ready check error: {0}", ex.Message);
+                }
+
+                if (attempt % 5 == 4)
+                    _trace?.Trace("  Still waiting for PSS project init... ({0}s)", (attempt + 1) * POLL_INTERVAL_MS / 1000);
+            }
+
+            _trace?.Trace("WARNING: PSS project root task not found after {0}s — proceeding anyway", MAX_POLLS * POLL_INTERVAL_MS / 1000);
+        }
+
+        /// <summary>
         /// Polls the msdyn_operationset record until its status indicates completion or failure.
         /// PSS ExecuteOperationSetV1 is async — records may not be committed immediately.
         /// </summary>
@@ -424,29 +470,7 @@ namespace ADC.MppImport.Services
             }
 
             // Also check for failed operation set detail records
-            var detailQuery = new QueryExpression("msdyn_operationsetdetail")
-            {
-                ColumnSet = new ColumnSet(true),
-                TopCount = 10,
-                Criteria = new FilterExpression
-                {
-                    Conditions =
-                    {
-                        new ConditionExpression("msdyn_operationsetid", ConditionOperator.Equal, osId)
-                    }
-                }
-            };
-
-            var details = _service.RetrieveMultiple(detailQuery);
-            _trace?.Trace("  OperationSetDetail records: {0}", details.Entities.Count);
-            foreach (var detail in details.Entities)
-            {
-                foreach (var attr in detail.Attributes)
-                {
-                    _trace?.Trace("    {0} = {1}", attr.Key, attr.Value);
-                }
-                _trace?.Trace("    ---");
-            }
+            // Detail query removed — field name varies across environments
         }
 
         #endregion

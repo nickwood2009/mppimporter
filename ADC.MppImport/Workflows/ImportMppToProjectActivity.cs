@@ -23,6 +23,9 @@ namespace ADC.MppImport.Workflows
         [RequiredArgument]
         public InArgument<EntityReference> TargetProject { get; set; }
 
+        [Input("Starts On")]
+        public InArgument<DateTime> StartsOn { get; set; }
+
         [Output("Tasks Created")]
         public OutArgument<int> TasksCreated { get; set; }
 
@@ -36,6 +39,7 @@ namespace ADC.MppImport.Workflows
         {
             var templateRef = CaseTemplate.Get(executionContext);
             var projectRef = TargetProject.Get(executionContext);
+            var startsOn = StartsOn.Get(executionContext);
 
             if (templateRef == null)
                 throw new InvalidPluginExecutionException("Case Template input is required.");
@@ -45,8 +49,11 @@ namespace ADC.MppImport.Workflows
             TracingService.Trace("ImportMppToProject: Template={0}, Project={1}",
                 templateRef.Id, projectRef.Id);
 
+            DateTime? projectStartDate = (startsOn != default(DateTime)) ? (DateTime?)startsOn : null;
+            TracingService.Trace("StartsOn input: {0}", projectStartDate.HasValue ? projectStartDate.Value.ToString("o") : "(not set)");
+
             var importService = new MppProjectImportService(OrganizationService, TracingService);
-            ImportResult result = importService.Execute(templateRef.Id, projectRef.Id);
+            ImportResult result = importService.Execute(templateRef.Id, projectRef.Id, projectStartDate);
 
             TasksCreated.Set(executionContext, result.TasksCreated);
             TasksUpdated.Set(executionContext, result.TasksUpdated);

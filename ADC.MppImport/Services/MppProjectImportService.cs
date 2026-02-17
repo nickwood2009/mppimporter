@@ -27,7 +27,7 @@ namespace ADC.MppImport.Services
         /// Main entry point: reads MPP from the case template file field, parses it,
         /// and creates/updates project tasks via the PSS API for the given project.
         /// </summary>
-        public ImportResult Execute(Guid caseTemplateId, Guid projectId)
+        public ImportResult Execute(Guid caseTemplateId, Guid projectId, DateTime? projectStartDate = null)
         {
             var result = new ImportResult();
 
@@ -143,8 +143,17 @@ namespace ADC.MppImport.Services
             const int PSS_BATCH_LIMIT_PHASE = 200;
             int batchNum = 0;
 
-            // Phase 1: tasks + parent links (batched if > 200)
+            // Phase 1: project start date (if provided) + task creates/updates + parent links
             var taskAndParentOps = new List<Action<string>>();
+
+            if (projectStartDate.HasValue)
+            {
+                _trace?.Trace("Setting project start date to {0:yyyy-MM-dd}", projectStartDate.Value);
+                var projectUpdate = new Entity("msdyn_project", projectId);
+                projectUpdate["msdyn_scheduledstart"] = projectStartDate.Value;
+                taskAndParentOps.Add(osId => PssUpdate(projectUpdate, osId));
+            }
+
             taskAndParentOps.AddRange(taskOps);
             taskAndParentOps.AddRange(parentOps);
 

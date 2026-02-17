@@ -151,10 +151,19 @@ namespace ADC.MppImport.Services
             batchNum = ExecuteOpsBatched(taskAndParentOps, projectId, PSS_BATCH_LIMIT_PHASE, "Tasks", batchNum);
 
             // Phase 2: Query CRM for actual task GUIDs (PSS assigns new GUIDs during ExecuteOperationSet).
-            // Brief delay to ensure CRM consistency after async operation set completion.
-            System.Threading.Thread.Sleep(5000);
-
-            var crmTasks = RetrieveExistingProjectTasks(projectId);
+            // Poll until the created tasks are queryable — operation set completion ≠ immediate availability.
+            int expectedCount = taskIdMap.Count;
+            List<Entity> crmTasks = null;
+            for (int poll = 0; poll < 12; poll++) // 12 × 5s = 60s max
+            {
+                System.Threading.Thread.Sleep(5000);
+                crmTasks = RetrieveExistingProjectTasks(projectId);
+                _trace?.Trace("Phase 2 poll {0}: {1} CRM tasks found (expecting ~{2})", poll + 1, crmTasks.Count, expectedCount);
+                // We expect at least our tasks + possibly a root task. 
+                // Accept if we got at least as many as we created.
+                if (crmTasks.Count >= expectedCount)
+                    break;
+            }
             _trace?.Trace("CRM tasks after Phase 1: {0} (MPP tasks: {1})", crmTasks.Count, taskIdMap.Count);
 
             // Log all CRM task names for diagnostics

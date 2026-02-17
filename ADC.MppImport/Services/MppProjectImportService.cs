@@ -55,6 +55,14 @@ namespace ADC.MppImport.Services
             var existingTasks = RetrieveExistingProjectTasks(projectId);
             _trace?.Trace("Existing msdyn_projecttask records: {0}", existingTasks.Count);
 
+            // If no existing tasks, the project may have just been created (e.g. by a workflow).
+            // PSS needs time to initialise the project before accepting operations.
+            if (existingTasks.Count == 0)
+            {
+                _trace?.Trace("New project detected — waiting 15s for PSS initialisation...");
+                System.Threading.Thread.Sleep(15000);
+            }
+
             // 4. Build a lookup of existing tasks by msdyn_msprojectclientid
             var existingByClientId = new Dictionary<string, Entity>(StringComparer.OrdinalIgnoreCase);
             foreach (var et in existingTasks)
@@ -219,45 +227,24 @@ namespace ADC.MppImport.Services
                 for (int i = start; i < start + size; i++)
                     ops[i](operationSetId);
 
-                // Retry ExecuteOperationSet with delay — PSS may not have indexed a newly created project yet
-                const int MAX_EXEC_RETRIES = 3;
-                const int EXEC_RETRY_DELAY_MS = 5000;
-                for (int retry = 0; retry < MAX_EXEC_RETRIES; retry++)
+                try
                 {
-                    try
-                    {
-                        string executeResult = ExecuteOperationSet(operationSetId);
-                        _trace?.Trace("Batch {0} executed successfully. Result: {1}", batchNum, executeResult ?? "(none)");
+                    string executeResult = ExecuteOperationSet(operationSetId);
+                    _trace?.Trace("Batch {0} executed successfully. Result: {1}", batchNum, executeResult ?? "(none)");
 
-                        // Wait for the operation set to fully complete before moving on
-                        WaitForOperationSetCompletion(operationSetId);
-                        break; // success
-                    }
-                    catch (Exception ex)
-                    {
-                        bool isRetryable = ex.Message.Contains("ProjectNotFound") || ex.Message.Contains("not found");
-                        if (isRetryable && retry < MAX_EXEC_RETRIES - 1)
-                        {
-                            _trace?.Trace("Batch {0} ({1}) attempt {2} failed: {3}. Retrying in {4}s...",
-                                batchNum, phase, retry + 1, ex.Message, EXEC_RETRY_DELAY_MS / 1000);
-                            System.Threading.Thread.Sleep(EXEC_RETRY_DELAY_MS);
+                    // Wait for the operation set to fully complete before moving on
+                    WaitForOperationSetCompletion(operationSetId);
+                }
+                catch (Exception ex)
+                {
+                    _trace?.Trace("Batch {0} ({1}) execution failed: {2}", batchNum, phase, ex.Message);
+                    if (ex.InnerException != null)
+                        _trace?.Trace("Inner: {0}", ex.InnerException.Message);
 
-                            // Re-create the operation set and re-queue ops for retry
-                            operationSetId = CreateOperationSet(projectId, string.Format("MPP Import {0} Batch {1} Retry {2}", phase, batchNum, retry + 1));
-                            for (int i = start; i < start + size; i++)
-                                ops[i](operationSetId);
-                            continue;
-                        }
+                    try { LogOperationSetStatus(operationSetId); }
+                    catch (Exception logEx) { _trace?.Trace("Could not retrieve OperationSet status: {0}", logEx.Message); }
 
-                        _trace?.Trace("Batch {0} ({1}) execution failed: {2}", batchNum, phase, ex.Message);
-                        if (ex.InnerException != null)
-                            _trace?.Trace("Inner: {0}", ex.InnerException.Message);
-
-                        try { LogOperationSetStatus(operationSetId); }
-                        catch (Exception logEx) { _trace?.Trace("Could not retrieve OperationSet status: {0}", logEx.Message); }
-
-                        throw;
-                    }
+                    throw;
                 }
 
                 start += size;

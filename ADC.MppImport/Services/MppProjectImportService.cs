@@ -16,6 +16,7 @@ namespace ADC.MppImport.Services
     {
         private readonly IOrganizationService _service;
         private readonly ITracingService _trace;
+        private readonly Dictionary<Guid, Guid> _preGenToActualGuid = new Dictionary<Guid, Guid>();
 
         public MppProjectImportService(IOrganizationService service, ITracingService trace)
         {
@@ -142,103 +143,32 @@ namespace ADC.MppImport.Services
 
             batchNum = ExecuteOpsBatched(taskAndParentOps, projectId, PSS_BATCH_LIMIT_PHASE, "Tasks", batchNum);
 
-            // Phase 2: PSS does NOT honour pre-generated GUIDs across operation sets.
-            // Wait for CRM records to become queryable, then rebuild the ID map by matching on msdyn_subject.
-            _trace?.Trace("Waiting 30s for CRM records to become queryable...");
-            _trace?.Trace("ProjectId for query: {0}", projectId);
-            System.Threading.Thread.Sleep(30000);
+            // Phase 2: Rebuild taskIdMap using actual CRM GUIDs from PssCreate responses.
+            // PssCreateV1 returns a recordId in its response which is the actual GUID PSS will use.
+            _trace?.Trace("PssCreate GUID mappings captured: {0}", _preGenToActualGuid.Count);
 
-            // Diagnostic: search for our first task name globally (no project filter)
-            string firstTaskName = project.Tasks.Count > 0 ? project.Tasks[0].Name : null;
-            if (firstTaskName != null)
-            {
-                try
-                {
-                    var nameQuery = new QueryExpression("msdyn_projecttask")
-                    {
-                        ColumnSet = new ColumnSet("msdyn_subject", "msdyn_project"),
-                        Criteria = new FilterExpression
-                        {
-                            Conditions =
-                            {
-                                new ConditionExpression("msdyn_subject", ConditionOperator.Equal, firstTaskName)
-                            }
-                        }
-                    };
-                    var nameResult = _service.RetrieveMultiple(nameQuery);
-                    _trace?.Trace("Global search for task '{0}': {1} found", firstTaskName, nameResult.Entities.Count);
-                    foreach (var t in nameResult.Entities)
-                    {
-                        var proj = t.Contains("msdyn_project") ? ((EntityReference)t["msdyn_project"]).Id.ToString() : "(null)";
-                        _trace?.Trace("  Found '{0}' project={1} id={2}", t.GetAttributeValue<string>("msdyn_subject"), proj, t.Id);
-                    }
-                }
-                catch (Exception ex) { _trace?.Trace("Name search failed: {0}", ex.Message); }
-            }
-
-            // Diagnostic: check last executed operation set details for errors
-            try
-            {
-                var osDetailQuery = new QueryExpression("msdyn_operationsetdetail")
-                {
-                    ColumnSet = new ColumnSet(true),
-                    TopCount = 5,
-                    Orders = { new OrderExpression("createdon", OrderType.Descending) }
-                };
-                var osDetailResult = _service.RetrieveMultiple(osDetailQuery);
-                _trace?.Trace("Recent OperationSetDetail records: {0}", osDetailResult.Entities.Count);
-                foreach (var d in osDetailResult.Entities)
-                {
-                    _trace?.Trace("  Detail: {0}", string.Join(", ",
-                        d.Attributes.Select(a => string.Format("{0}={1}", a.Key, a.Value))));
-                }
-            }
-            catch (Exception ex) { _trace?.Trace("OpSetDetail query failed: {0}", ex.Message); }
-
-            var crmTasks = RetrieveExistingProjectTasks(projectId);
-            _trace?.Trace("CRM tasks after phase 1 (filtered by project {0}): {1}", projectId, crmTasks.Count);
-
-            var crmTaskIdMap = new Dictionary<int, Guid>();
-            // Build name -> CRM GUID lookup
-            var crmByName = new Dictionary<string, List<Entity>>();
-            foreach (var ct in crmTasks)
-            {
-                string name = ct.GetAttributeValue<string>("msdyn_subject");
-                if (string.IsNullOrEmpty(name)) continue;
-                if (!crmByName.ContainsKey(name))
-                    crmByName[name] = new List<Entity>();
-                crmByName[name].Add(ct);
-            }
-
-            // Match MPP tasks to CRM tasks by name
-            foreach (var mppTask in project.Tasks)
-            {
-                if (!mppTask.UniqueID.HasValue || string.IsNullOrEmpty(mppTask.Name)) continue;
-
-                List<Entity> matches;
-                if (!crmByName.TryGetValue(mppTask.Name, out matches) || matches.Count == 0) continue;
-
-                crmTaskIdMap[mppTask.UniqueID.Value] = matches[0].Id;
-                if (matches.Count > 1)
-                {
-                    _trace?.Trace("  NOTE: Duplicate task name '{0}', using first of {1}", mppTask.Name, matches.Count);
-                    matches.RemoveAt(0);
-                }
-            }
-
-            _trace?.Trace("Matched {0} of {1} MPP tasks to CRM records by name", crmTaskIdMap.Count, taskIdMap.Count);
-
-            // Log unmatched tasks
+            var actualTaskIdMap = new Dictionary<int, Guid>();
+            int mapped = 0, unchanged = 0;
             foreach (var kvp in taskIdMap)
             {
-                if (!crmTaskIdMap.ContainsKey(kvp.Key))
+                Guid preGenGuid = kvp.Value;
+                Guid actualGuid;
+                if (_preGenToActualGuid.TryGetValue(preGenGuid, out actualGuid))
                 {
-                    var mppTask = project.Tasks.FirstOrDefault(t => t.UniqueID.HasValue && t.UniqueID.Value == kvp.Key);
-                    _trace?.Trace("  UNMATCHED: MPP#{0} '{1}'", kvp.Key, mppTask != null ? mppTask.Name : "?");
+                    actualTaskIdMap[kvp.Key] = actualGuid;
+                    if (preGenGuid != actualGuid) mapped++;
+                    else unchanged++;
+                }
+                else
+                {
+                    // No mapping found — use pre-gen GUID as fallback
+                    actualTaskIdMap[kvp.Key] = preGenGuid;
+                    unchanged++;
                 }
             }
+            _trace?.Trace("Task GUID mapping: {0} remapped, {1} unchanged, {2} total", mapped, unchanged, actualTaskIdMap.Count);
 
-            // Build dependency ops using actual CRM GUIDs
+            // Build dependency ops using actual GUIDs
             int totalMppPredecessors = 0;
             foreach (var t in project.Tasks)
                 totalMppPredecessors += (t.Predecessors != null ? t.Predecessors.Count : 0);
@@ -254,12 +184,12 @@ namespace ADC.MppImport.Services
                     if (mppTask.Predecessors == null || mppTask.Predecessors.Count == 0) continue;
 
                     Guid successorId;
-                    if (!crmTaskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
+                    if (!actualTaskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
 
                     foreach (var relation in mppTask.Predecessors)
                     {
                         Guid predecessorId;
-                        if (!crmTaskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
+                        if (!actualTaskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
 
                         var dep = new Entity("msdyn_projecttaskdependency");
                         dep.Id = Guid.NewGuid();
@@ -276,7 +206,7 @@ namespace ADC.MppImport.Services
             else
             {
                 _trace?.Trace("MPP has no predecessor relationships. Auto-creating sequential FS dependencies.");
-                depOps = BuildAutoSequentialDependencyOps(project, projectRef, crmTaskIdMap);
+                depOps = BuildAutoSequentialDependencyOps(project, projectRef, actualTaskIdMap);
             }
 
             result.DependenciesCreated = depOps.Count;
@@ -356,10 +286,19 @@ namespace ADC.MppImport.Services
                 try
                 {
                     var osRecord = _service.Retrieve("msdyn_operationset", osId,
-                        new ColumnSet("msdyn_status", "msdyn_description"));
+                        new ColumnSet(true));
 
-                    var statusValue = osRecord.GetAttributeValue<OptionSetValue>("msdyn_status");
-                    int status = statusValue != null ? statusValue.Value : -1;
+                    // Try multiple possible status field names for compatibility
+                    int status = -1;
+                    foreach (string fieldName in new[] { "msdyn_status", "statuscode" })
+                    {
+                        var statusValue = osRecord.GetAttributeValue<OptionSetValue>(fieldName);
+                        if (statusValue != null)
+                        {
+                            status = statusValue.Value;
+                            break;
+                        }
+                    }
 
                     // 192350001 = Completed, 192350002 = Failed, 192350003 = Cancelled
                     // Some environments use 1/2/3 instead
@@ -402,29 +341,53 @@ namespace ADC.MppImport.Services
 
         /// <summary>
         /// Calls msdyn_PssCreateV1 to queue a create operation in the operation set.
-        /// Returns the response from PSS (typically the actual record ID).
+        /// Extracts the recordId from the response and stores the pre-gen → actual GUID mapping.
         /// </summary>
-        private string PssCreate(Entity entity, string operationSetId)
+        private void PssCreate(Entity entity, string operationSetId)
         {
             var request = new OrganizationRequest("msdyn_PssCreateV1");
             request["Entity"] = entity;
             request["OperationSetId"] = operationSetId;
             var response = _service.Execute(request);
 
-            // Log all response keys for diagnostics (first 3 calls)
-            if (_pssCreateLogCount < 3)
-            {
-                _pssCreateLogCount++;
-                foreach (var kvp in response.Results)
-                    _trace?.Trace("  PssCreateV1 response key: {0} = {1}", kvp.Key, kvp.Value);
-            }
-
-            // Try to extract the actual record ID from response
+            // Extract recordId from PssCreateV1 JSON response
             if (response.Results.ContainsKey("OperationSetResponse"))
-                return response["OperationSetResponse"]?.ToString();
-            return null;
+            {
+                string json = response["OperationSetResponse"]?.ToString();
+                if (!string.IsNullOrEmpty(json))
+                {
+                    string recordId = ExtractJsonValue(json, "recordId");
+                    Guid actualGuid;
+                    if (!string.IsNullOrEmpty(recordId) && Guid.TryParse(recordId, out actualGuid))
+                    {
+                        _preGenToActualGuid[entity.Id] = actualGuid;
+                        if (_preGenToActualGuid.Count <= 3)
+                            _trace?.Trace("  PssCreate mapping: {0} -> {1}", entity.Id, actualGuid);
+                    }
+                }
+            }
         }
-        private int _pssCreateLogCount = 0;
+
+        /// <summary>
+        /// Extracts a value from a simple JSON key-value array like [{"Key":"k","Value":"v"},...]
+        /// </summary>
+        private static string ExtractJsonValue(string json, string key)
+        {
+            // Look for pattern: "Key":"<key>","Value":"<value>"
+            string keyPattern = "\"Key\":\"" + key + "\"";
+            int keyIdx = json.IndexOf(keyPattern, StringComparison.OrdinalIgnoreCase);
+            if (keyIdx < 0) return null;
+
+            string valuePattern = "\"Value\":\"";
+            int valIdx = json.IndexOf(valuePattern, keyIdx, StringComparison.OrdinalIgnoreCase);
+            if (valIdx < 0) return null;
+
+            int valStart = valIdx + valuePattern.Length;
+            int valEnd = json.IndexOf("\"", valStart, StringComparison.Ordinal);
+            if (valEnd < 0) return null;
+
+            return json.Substring(valStart, valEnd - valStart);
+        }
 
         /// <summary>
         /// Calls msdyn_PssUpdateV1 to queue an update operation in the operation set.

@@ -143,32 +143,10 @@ namespace ADC.MppImport.Services
 
             batchNum = ExecuteOpsBatched(taskAndParentOps, projectId, PSS_BATCH_LIMIT_PHASE, "Tasks", batchNum);
 
-            // Phase 2: Rebuild taskIdMap using actual CRM GUIDs from PssCreate responses.
-            // PssCreateV1 returns a recordId in its response which is the actual GUID PSS will use.
-            _trace?.Trace("PssCreate GUID mappings captured: {0}", _preGenToActualGuid.Count);
+            // Phase 2: PSS honours pre-generated GUIDs, so use taskIdMap directly for dependencies.
+            _trace?.Trace("Task IDs for dependency mapping: {0}", taskIdMap.Count);
 
-            var actualTaskIdMap = new Dictionary<int, Guid>();
-            int mapped = 0, unchanged = 0;
-            foreach (var kvp in taskIdMap)
-            {
-                Guid preGenGuid = kvp.Value;
-                Guid actualGuid;
-                if (_preGenToActualGuid.TryGetValue(preGenGuid, out actualGuid))
-                {
-                    actualTaskIdMap[kvp.Key] = actualGuid;
-                    if (preGenGuid != actualGuid) mapped++;
-                    else unchanged++;
-                }
-                else
-                {
-                    // No mapping found — use pre-gen GUID as fallback
-                    actualTaskIdMap[kvp.Key] = preGenGuid;
-                    unchanged++;
-                }
-            }
-            _trace?.Trace("Task GUID mapping: {0} remapped, {1} unchanged, {2} total", mapped, unchanged, actualTaskIdMap.Count);
-
-            // Build dependency ops using actual GUIDs
+            // Build dependency ops using pre-generated GUIDs (PSS uses them as-is)
             int totalMppPredecessors = 0;
             foreach (var t in project.Tasks)
                 totalMppPredecessors += (t.Predecessors != null ? t.Predecessors.Count : 0);
@@ -184,12 +162,12 @@ namespace ADC.MppImport.Services
                     if (mppTask.Predecessors == null || mppTask.Predecessors.Count == 0) continue;
 
                     Guid successorId;
-                    if (!actualTaskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
+                    if (!taskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
 
                     foreach (var relation in mppTask.Predecessors)
                     {
                         Guid predecessorId;
-                        if (!actualTaskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
+                        if (!taskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
 
                         var dep = new Entity("msdyn_projecttaskdependency");
                         dep.Id = Guid.NewGuid();
@@ -206,7 +184,7 @@ namespace ADC.MppImport.Services
             else
             {
                 _trace?.Trace("MPP has no predecessor relationships. Auto-creating sequential FS dependencies.");
-                depOps = BuildAutoSequentialDependencyOps(project, projectRef, actualTaskIdMap);
+                depOps = BuildAutoSequentialDependencyOps(project, projectRef, taskIdMap);
             }
 
             result.DependenciesCreated = depOps.Count;
@@ -241,24 +219,45 @@ namespace ADC.MppImport.Services
                 for (int i = start; i < start + size; i++)
                     ops[i](operationSetId);
 
-                try
+                // Retry ExecuteOperationSet with delay — PSS may not have indexed a newly created project yet
+                const int MAX_EXEC_RETRIES = 3;
+                const int EXEC_RETRY_DELAY_MS = 5000;
+                for (int retry = 0; retry < MAX_EXEC_RETRIES; retry++)
                 {
-                    string executeResult = ExecuteOperationSet(operationSetId);
-                    _trace?.Trace("Batch {0} executed successfully. Result: {1}", batchNum, executeResult ?? "(none)");
+                    try
+                    {
+                        string executeResult = ExecuteOperationSet(operationSetId);
+                        _trace?.Trace("Batch {0} executed successfully. Result: {1}", batchNum, executeResult ?? "(none)");
 
-                    // Wait for the operation set to fully complete before moving on
-                    WaitForOperationSetCompletion(operationSetId);
-                }
-                catch (Exception ex)
-                {
-                    _trace?.Trace("Batch {0} ({1}) execution failed: {2}", batchNum, phase, ex.Message);
-                    if (ex.InnerException != null)
-                        _trace?.Trace("Inner: {0}", ex.InnerException.Message);
+                        // Wait for the operation set to fully complete before moving on
+                        WaitForOperationSetCompletion(operationSetId);
+                        break; // success
+                    }
+                    catch (Exception ex)
+                    {
+                        bool isRetryable = ex.Message.Contains("ProjectNotFound") || ex.Message.Contains("not found");
+                        if (isRetryable && retry < MAX_EXEC_RETRIES - 1)
+                        {
+                            _trace?.Trace("Batch {0} ({1}) attempt {2} failed: {3}. Retrying in {4}s...",
+                                batchNum, phase, retry + 1, ex.Message, EXEC_RETRY_DELAY_MS / 1000);
+                            System.Threading.Thread.Sleep(EXEC_RETRY_DELAY_MS);
 
-                    try { LogOperationSetStatus(operationSetId); }
-                    catch (Exception logEx) { _trace?.Trace("Could not retrieve OperationSet status: {0}", logEx.Message); }
+                            // Re-create the operation set and re-queue ops for retry
+                            operationSetId = CreateOperationSet(projectId, string.Format("MPP Import {0} Batch {1} Retry {2}", phase, batchNum, retry + 1));
+                            for (int i = start; i < start + size; i++)
+                                ops[i](operationSetId);
+                            continue;
+                        }
 
-                    throw;
+                        _trace?.Trace("Batch {0} ({1}) execution failed: {2}", batchNum, phase, ex.Message);
+                        if (ex.InnerException != null)
+                            _trace?.Trace("Inner: {0}", ex.InnerException.Message);
+
+                        try { LogOperationSetStatus(operationSetId); }
+                        catch (Exception logEx) { _trace?.Trace("Could not retrieve OperationSet status: {0}", logEx.Message); }
+
+                        throw;
+                    }
                 }
 
                 start += size;
@@ -430,7 +429,7 @@ namespace ADC.MppImport.Services
             if (!Guid.TryParse(operationSetId, out osId)) return;
 
             var osRecord = _service.Retrieve("msdyn_operationset", osId,
-                new ColumnSet("msdyn_status", "msdyn_statuscode", "msdyn_description"));
+                new ColumnSet(true));
 
             foreach (var attr in osRecord.Attributes)
             {

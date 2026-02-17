@@ -16,6 +16,7 @@ namespace ADC.MppImport.Services
     {
         private readonly IOrganizationService _service;
         private readonly ITracingService _trace;
+        private readonly Dictionary<Guid, Guid> _preGenToActualGuid = new Dictionary<Guid, Guid>();
 
         public MppProjectImportService(IOrganizationService service, ITracingService trace)
         {
@@ -150,39 +151,29 @@ namespace ADC.MppImport.Services
 
             batchNum = ExecuteOpsBatched(taskAndParentOps, projectId, PSS_BATCH_LIMIT_PHASE, "Tasks", batchNum);
 
-            // Phase 2: Query CRM for actual task GUIDs assigned by PSS.
-            // PSS does NOT honour pre-generated GUIDs — it assigns new ones during ExecuteOperationSet.
-            var crmTasks = RetrieveExistingProjectTasks(projectId);
-            _trace?.Trace("CRM tasks after Phase 1: {0}", crmTasks.Count);
-
-            // Rebuild taskIdMap by matching msdyn_subject (task name) to MPP task name
-            var crmTasksByName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
-            foreach (var crmTask in crmTasks)
-            {
-                string name = crmTask.GetAttributeValue<string>("msdyn_subject");
-                if (!string.IsNullOrEmpty(name) && !crmTasksByName.ContainsKey(name))
-                    crmTasksByName[name] = crmTask.Id;
-            }
+            // Phase 2: Rebuild taskIdMap using actual CRM GUIDs from PssCreate responses.
+            _trace?.Trace("PssCreate GUID mappings captured: {0}", _preGenToActualGuid.Count);
 
             var actualTaskIdMap = new Dictionary<int, Guid>();
-            int matched = 0, unmatched = 0;
-            foreach (var mppTask in project.Tasks)
+            int remapped = 0, unchanged = 0;
+            foreach (var kvp in taskIdMap)
             {
-                if (!mppTask.UniqueID.HasValue) continue;
-                string name = mppTask.Name ?? "(Unnamed Task)";
-                Guid crmId;
-                if (crmTasksByName.TryGetValue(name, out crmId))
+                Guid preGenGuid = kvp.Value;
+                Guid actualGuid;
+                if (_preGenToActualGuid.TryGetValue(preGenGuid, out actualGuid))
                 {
-                    actualTaskIdMap[mppTask.UniqueID.Value] = crmId;
-                    matched++;
+                    actualTaskIdMap[kvp.Key] = actualGuid;
+                    if (preGenGuid != actualGuid) remapped++;
+                    else unchanged++;
                 }
                 else
                 {
-                    unmatched++;
-                    _trace?.Trace("  WARNING: No CRM match for MPP task [{0}] '{1}'", mppTask.UniqueID.Value, name);
+                    // No mapping found — use pre-gen GUID as fallback
+                    actualTaskIdMap[kvp.Key] = preGenGuid;
+                    unchanged++;
                 }
             }
-            _trace?.Trace("Task name matching: {0} matched, {1} unmatched (of {2} CRM tasks)", matched, unmatched, crmTasks.Count);
+            _trace?.Trace("Task GUID mapping: {0} remapped, {1} unchanged, {2} total", remapped, unchanged, actualTaskIdMap.Count);
 
             // Build dependency ops using actual CRM GUIDs
             int totalMppPredecessors = 0;
@@ -403,13 +394,51 @@ namespace ADC.MppImport.Services
 
         /// <summary>
         /// Calls msdyn_PssCreateV1 to queue a create operation in the operation set.
+        /// Captures the recordId from the response to build a pre-gen → actual GUID mapping.
         /// </summary>
         private void PssCreate(Entity entity, string operationSetId)
         {
             var request = new OrganizationRequest("msdyn_PssCreateV1");
             request["Entity"] = entity;
             request["OperationSetId"] = operationSetId;
-            _service.Execute(request);
+            var response = _service.Execute(request);
+
+            // Extract recordId from PssCreateV1 JSON response
+            if (response.Results.ContainsKey("OperationSetResponse"))
+            {
+                string json = response["OperationSetResponse"]?.ToString();
+                if (!string.IsNullOrEmpty(json))
+                {
+                    string recordId = ExtractJsonValue(json, "recordId");
+                    Guid actualGuid;
+                    if (!string.IsNullOrEmpty(recordId) && Guid.TryParse(recordId, out actualGuid))
+                    {
+                        _preGenToActualGuid[entity.Id] = actualGuid;
+                        if (_preGenToActualGuid.Count <= 5)
+                            _trace?.Trace("  PssCreate mapping: {0} -> {1}", entity.Id, actualGuid);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Extracts a value from a simple JSON key-value array like [{"Key":"k","Value":"v"},...]
+        /// </summary>
+        private static string ExtractJsonValue(string json, string key)
+        {
+            string keyPattern = "\"Key\":\"" + key + "\"";
+            int keyIdx = json.IndexOf(keyPattern, StringComparison.OrdinalIgnoreCase);
+            if (keyIdx < 0) return null;
+
+            string valuePattern = "\"Value\":\"";
+            int valIdx = json.IndexOf(valuePattern, keyIdx, StringComparison.OrdinalIgnoreCase);
+            if (valIdx < 0) return null;
+
+            int valStart = valIdx + valuePattern.Length;
+            int valEnd = json.IndexOf("\"", valStart, StringComparison.Ordinal);
+            if (valEnd < 0) return null;
+
+            return json.Substring(valStart, valEnd - valStart);
         }
 
         /// <summary>

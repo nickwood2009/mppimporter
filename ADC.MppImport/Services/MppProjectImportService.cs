@@ -16,7 +16,6 @@ namespace ADC.MppImport.Services
     {
         private readonly IOrganizationService _service;
         private readonly ITracingService _trace;
-        private readonly Dictionary<Guid, Guid> _preGenToActualGuid = new Dictionary<Guid, Guid>();
 
         public MppProjectImportService(IOrganizationService service, ITracingService trace)
         {
@@ -151,10 +150,25 @@ namespace ADC.MppImport.Services
 
             batchNum = ExecuteOpsBatched(taskAndParentOps, projectId, PSS_BATCH_LIMIT_PHASE, "Tasks", batchNum);
 
-            // Phase 2: PSS honours pre-generated GUIDs, so use taskIdMap directly for dependencies.
-            _trace?.Trace("Task IDs for dependency mapping: {0}", taskIdMap.Count);
+            // Phase 2: Query CRM for actual task GUIDs assigned by PSS.
+            // PSS does NOT honour pre-generated GUIDs — it assigns new ones during ExecuteOperationSet.
+            var crmTasks = RetrieveExistingProjectTasks(projectId);
+            _trace?.Trace("CRM tasks after Phase 1: {0}", crmTasks.Count);
 
-            // Build dependency ops using pre-generated GUIDs (PSS uses them as-is)
+            // Rebuild taskIdMap using msdyn_msprojectclientid -> actual CRM GUID
+            var actualTaskIdMap = new Dictionary<int, Guid>();
+            foreach (var crmTask in crmTasks)
+            {
+                string clientId = crmTask.GetAttributeValue<string>("msdyn_msprojectclientid");
+                int mppUniqueId;
+                if (!string.IsNullOrEmpty(clientId) && int.TryParse(clientId, out mppUniqueId))
+                {
+                    actualTaskIdMap[mppUniqueId] = crmTask.Id;
+                }
+            }
+            _trace?.Trace("Mapped {0} CRM tasks back to MPP IDs (of {1} MPP tasks)", actualTaskIdMap.Count, taskIdMap.Count);
+
+            // Build dependency ops using actual CRM GUIDs
             int totalMppPredecessors = 0;
             foreach (var t in project.Tasks)
                 totalMppPredecessors += (t.Predecessors != null ? t.Predecessors.Count : 0);
@@ -170,12 +184,12 @@ namespace ADC.MppImport.Services
                     if (mppTask.Predecessors == null || mppTask.Predecessors.Count == 0) continue;
 
                     Guid successorId;
-                    if (!taskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
+                    if (!actualTaskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
 
                     foreach (var relation in mppTask.Predecessors)
                     {
                         Guid predecessorId;
-                        if (!taskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
+                        if (!actualTaskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
 
                         var dep = new Entity("msdyn_projecttaskdependency");
                         dep.Id = Guid.NewGuid();
@@ -192,7 +206,7 @@ namespace ADC.MppImport.Services
             else
             {
                 _trace?.Trace("MPP has no predecessor relationships. Auto-creating sequential FS dependencies.");
-                depOps = BuildAutoSequentialDependencyOps(project, projectRef, taskIdMap);
+                depOps = BuildAutoSequentialDependencyOps(project, projectRef, actualTaskIdMap);
             }
 
             result.DependenciesCreated = depOps.Count;
@@ -373,52 +387,13 @@ namespace ADC.MppImport.Services
 
         /// <summary>
         /// Calls msdyn_PssCreateV1 to queue a create operation in the operation set.
-        /// Extracts the recordId from the response and stores the pre-gen → actual GUID mapping.
         /// </summary>
         private void PssCreate(Entity entity, string operationSetId)
         {
             var request = new OrganizationRequest("msdyn_PssCreateV1");
             request["Entity"] = entity;
             request["OperationSetId"] = operationSetId;
-            var response = _service.Execute(request);
-
-            // Extract recordId from PssCreateV1 JSON response
-            if (response.Results.ContainsKey("OperationSetResponse"))
-            {
-                string json = response["OperationSetResponse"]?.ToString();
-                if (!string.IsNullOrEmpty(json))
-                {
-                    string recordId = ExtractJsonValue(json, "recordId");
-                    Guid actualGuid;
-                    if (!string.IsNullOrEmpty(recordId) && Guid.TryParse(recordId, out actualGuid))
-                    {
-                        _preGenToActualGuid[entity.Id] = actualGuid;
-                        if (_preGenToActualGuid.Count <= 3)
-                            _trace?.Trace("  PssCreate mapping: {0} -> {1}", entity.Id, actualGuid);
-                    }
-                }
-            }
-        }
-
-        /// <summary>
-        /// Extracts a value from a simple JSON key-value array like [{"Key":"k","Value":"v"},...]
-        /// </summary>
-        private static string ExtractJsonValue(string json, string key)
-        {
-            // Look for pattern: "Key":"<key>","Value":"<value>"
-            string keyPattern = "\"Key\":\"" + key + "\"";
-            int keyIdx = json.IndexOf(keyPattern, StringComparison.OrdinalIgnoreCase);
-            if (keyIdx < 0) return null;
-
-            string valuePattern = "\"Value\":\"";
-            int valIdx = json.IndexOf(valuePattern, keyIdx, StringComparison.OrdinalIgnoreCase);
-            if (valIdx < 0) return null;
-
-            int valStart = valIdx + valuePattern.Length;
-            int valEnd = json.IndexOf("\"", valStart, StringComparison.Ordinal);
-            if (valEnd < 0) return null;
-
-            return json.Substring(valStart, valEnd - valStart);
+            _service.Execute(request);
         }
 
         /// <summary>
@@ -486,6 +461,8 @@ namespace ADC.MppImport.Services
             entity["msdyn_project"] = projectRef;
             entity["msdyn_projectbucket"] = bucketRef;
             entity["msdyn_subject"] = mppTask.Name ?? "(Unnamed Task)";
+            if (mppTask.UniqueID.HasValue)
+                entity["msdyn_msprojectclientid"] = mppTask.UniqueID.Value.ToString();
             entity["msdyn_LinkStatus"] = new OptionSetValue(192350000); // Not Linked
 
             // Summary tasks (parents): PSS auto-calculates duration/effort from children

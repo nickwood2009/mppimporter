@@ -77,7 +77,34 @@ namespace ADC.MppImport.Services
             _trace?.Trace("Using project bucket: {0}", bucketRef.Id);
 
 
-            // 6. Pre-generate IDs for new tasks; build map of MPP UniqueID -> CRM record GUID
+            // 6. Derive parent from OutlineLevel for tasks where ParentTask was not set by the MPP reader.
+            //    Must run before task entity creation so HasChildTasks is correct for summary detection.
+            var sortedByOrder = project.Tasks.Where(t => t.UniqueID.HasValue).OrderBy(t => t.ID ?? 0).ToList();
+            var lastAtLevel = new Dictionary<int, Task>();
+            int parentsDerived = 0;
+            foreach (var mppTask in sortedByOrder)
+            {
+                int level = mppTask.OutlineLevel ?? 0;
+                if (level > 0 && mppTask.ParentTask == null)
+                {
+                    Task derivedParent;
+                    if (lastAtLevel.TryGetValue(level - 1, out derivedParent))
+                    {
+                        mppTask.ParentTask = derivedParent;
+                        if (!derivedParent.ChildTasks.Contains(mppTask))
+                            derivedParent.ChildTasks.Add(mppTask);
+                        parentsDerived++;
+                        _trace?.Trace("  Derived parent for [{0}] '{1}' (level {2}) -> [{3}] '{4}'",
+                            mppTask.UniqueID.Value, mppTask.Name, level,
+                            derivedParent.UniqueID.Value, derivedParent.Name);
+                    }
+                }
+                lastAtLevel[level] = mppTask;
+            }
+            if (parentsDerived > 0)
+                _trace?.Trace("Derived {0} parent relationships from outline levels", parentsDerived);
+
+            // 7. Pre-generate IDs for new tasks; build map of MPP UniqueID -> CRM record GUID
             var taskIdMap = new Dictionary<int, Guid>();
 
             // Collect all task operations first to allow batching
@@ -536,6 +563,10 @@ namespace ADC.MppImport.Services
             entity["msdyn_projectbucket"] = bucketRef;
             entity["msdyn_subject"] = mppTask.Name ?? "(Unnamed Task)";
             entity["msdyn_LinkStatus"] = new OptionSetValue(192350000); // Not Linked
+
+            // Preserve MPP outline order
+            if (mppTask.ID.HasValue)
+                entity["msdyn_displayorder"] = (long)mppTask.ID.Value;
 
             // Summary tasks (parents): PSS auto-calculates duration/effort from children
             // Only set duration/effort on leaf tasks

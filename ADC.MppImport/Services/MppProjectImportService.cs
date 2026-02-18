@@ -190,9 +190,9 @@ namespace ADC.MppImport.Services
             // Poll until the created tasks are queryable — operation set completion ≠ immediate availability.
             int expectedCount = taskIdMap.Count;
             List<Entity> crmTasks = null;
-            for (int poll = 0; poll < 12; poll++) // 12 × 5s = 60s max
+            for (int poll = 0; poll < 6; poll++) // 6 × 3s = 18s max
             {
-                System.Threading.Thread.Sleep(5000);
+                System.Threading.Thread.Sleep(3000);
                 crmTasks = RetrieveExistingProjectTasks(projectId);
                 _trace?.Trace("Phase 2 poll {0}: {1} CRM tasks found (expecting ~{2})", poll + 1, crmTasks.Count, expectedCount);
                 // We expect at least our tasks + possibly a root task. 
@@ -373,8 +373,8 @@ namespace ADC.MppImport.Services
         /// </summary>
         private void WaitForProjectReady(Guid projectId)
         {
-            const int MAX_POLLS = 20;
-            const int POLL_INTERVAL_MS = 3000; // 3s × 20 = 60s max
+            const int MAX_POLLS = 5;
+            const int POLL_INTERVAL_MS = 2000; // 2s × 5 = 10s max (async workflow wait step handles most of the delay)
 
             for (int attempt = 0; attempt < MAX_POLLS; attempt++)
             {
@@ -423,8 +423,8 @@ namespace ADC.MppImport.Services
             if (!Guid.TryParse(operationSetId, out osId)) return;
 
             // msdyn_operationset statuses: 0=Open, 1=Completed, 2=Failed, 3=Cancelled (may vary)
-            const int MAX_POLLS = 60;
-            const int POLL_INTERVAL_MS = 2000;
+            const int MAX_POLLS = 20;
+            const int POLL_INTERVAL_MS = 2000; // 2s × 20 = 40s max
 
             for (int attempt = 0; attempt < MAX_POLLS; attempt++)
             {

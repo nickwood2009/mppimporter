@@ -220,12 +220,23 @@ namespace ADC.MppImport.Services
             _trace?.Trace("Task matching: {0} matched, {1} unmatched, {2} duplicate-name warnings", matched, unmatched, duplicateWarnings);
 
             // Build dependency ops using actual CRM GUIDs
+            // First, query existing dependencies so we don't create duplicates
+            var existingDeps = RetrieveExistingDependencies(projectId);
+            var seenLinks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var ed in existingDeps)
+            {
+                var predRef = ed.GetAttributeValue<EntityReference>("msdyn_predecessortask");
+                var succRef = ed.GetAttributeValue<EntityReference>("msdyn_successortask");
+                if (predRef != null && succRef != null)
+                    seenLinks.Add(string.Format("{0}|{1}", predRef.Id, succRef.Id));
+            }
+            _trace?.Trace("Existing dependencies in CRM: {0}", existingDeps.Count);
+
             int totalMppPredecessors = 0;
             foreach (var t in project.Tasks)
                 totalMppPredecessors += (t.Predecessors != null ? t.Predecessors.Count : 0);
 
             var depOps = new List<Action<string>>();
-            var seenLinks = new HashSet<string>(); // deduplicate predecessor-successor pairs
             int duplicatesSkipped = 0;
 
             if (totalMppPredecessors > 0)
@@ -729,6 +740,45 @@ namespace ADC.MppImport.Services
             var query = new QueryExpression("msdyn_projecttask")
             {
                 ColumnSet = new ColumnSet("msdyn_msprojectclientid", "msdyn_subject"),
+                Criteria = new FilterExpression
+                {
+                    Conditions =
+                    {
+                        new ConditionExpression("msdyn_project", ConditionOperator.Equal, projectId)
+                    }
+                }
+            };
+
+            var results = new List<Entity>();
+            query.PageInfo = new PagingInfo { PageNumber = 1, Count = 5000 };
+
+            while (true)
+            {
+                var response = _service.RetrieveMultiple(query);
+                results.AddRange(response.Entities);
+
+                if (response.MoreRecords)
+                {
+                    query.PageInfo.PageNumber++;
+                    query.PageInfo.PagingCookie = response.PagingCookie;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// Retrieves all existing msdyn_projecttaskdependency records for a given project.
+        /// </summary>
+        private List<Entity> RetrieveExistingDependencies(Guid projectId)
+        {
+            var query = new QueryExpression("msdyn_projecttaskdependency")
+            {
+                ColumnSet = new ColumnSet("msdyn_predecessortask", "msdyn_successortask"),
                 Criteria = new FilterExpression
                 {
                     Conditions =

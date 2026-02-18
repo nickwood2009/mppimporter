@@ -110,8 +110,8 @@ namespace ADC.MppImport.Services
             // Collect all task operations first to allow batching
             var taskOps = new List<Action<string>>();
 
-            // First pass: queue PssCreate or PssUpdate for each task
-            foreach (var mppTask in project.Tasks)
+            // First pass: queue PssCreate or PssUpdate for each task (sorted by MPP ID for correct display order)
+            foreach (var mppTask in sortedByOrder)
             {
                 if (!mppTask.UniqueID.HasValue) continue;
 
@@ -563,10 +563,6 @@ namespace ADC.MppImport.Services
             entity["msdyn_projectbucket"] = bucketRef;
             entity["msdyn_subject"] = mppTask.Name ?? "(Unnamed Task)";
             entity["msdyn_LinkStatus"] = new OptionSetValue(192350000); // Not Linked
-
-            // Preserve MPP outline order
-            if (mppTask.ID.HasValue)
-                entity["msdyn_displayorder"] = (long)mppTask.ID.Value;
 
             // Summary tasks (parents): PSS auto-calculates duration/effort from children
             // Only set duration/effort on leaf tasks

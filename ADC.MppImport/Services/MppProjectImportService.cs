@@ -79,7 +79,7 @@ namespace ADC.MppImport.Services
 
             // 6. Derive parent from OutlineLevel for tasks where ParentTask was not set by the MPP reader.
             //    Must run before task entity creation so HasChildTasks is correct for summary detection.
-            var sortedByOrder = project.Tasks.Where(t => t.UniqueID.HasValue).OrderBy(t => t.ID ?? 0).ToList();
+            var sortedByOrder = project.Tasks.Where(t => t.UniqueID.HasValue).ToList(); // preserve MPP file order (= outline order)
             var lastAtLevel = new Dictionary<int, Task>();
             int parentsDerived = 0;
             foreach (var mppTask in sortedByOrder)

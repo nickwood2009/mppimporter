@@ -186,67 +186,12 @@ namespace ADC.MppImport.Services
 
             batchNum = ExecuteOpsBatched(taskAndParentOps, projectId, PSS_BATCH_LIMIT_PHASE, "Tasks", batchNum);
 
-            // Phase 2: Query CRM for actual task GUIDs (PSS assigns new GUIDs during ExecuteOperationSet).
-            // Poll until the created tasks are queryable — operation set completion ≠ immediate availability.
-            int expectedCount = taskIdMap.Count;
-            List<Entity> crmTasks = null;
-            for (int poll = 0; poll < 6; poll++) // 6 × 3s = 18s max
-            {
-                System.Threading.Thread.Sleep(3000);
-                crmTasks = RetrieveExistingProjectTasks(projectId);
-                _trace?.Trace("Phase 2 poll {0}: {1} CRM tasks found (expecting ~{2})", poll + 1, crmTasks.Count, expectedCount);
-                // We expect at least our tasks + possibly a root task. 
-                // Accept if we got at least as many as we created.
-                if (crmTasks.Count >= expectedCount)
-                    break;
-            }
-            _trace?.Trace("CRM tasks after Phase 1: {0} (MPP tasks: {1})", crmTasks.Count, taskIdMap.Count);
+            // Phase 2: Build dependency ops using the pre-generated GUIDs from taskIdMap.
+            // PSS honours the GUIDs we set on PssCreate (msdyn_projecttaskid), so no need to
+            // re-query CRM or match by name — taskIdMap already contains the correct mappings.
+            _trace?.Trace("Building dependencies using {0} pre-generated task GUIDs", taskIdMap.Count);
 
-            // Log all CRM task names for diagnostics
-            foreach (var ct in crmTasks)
-            {
-                _trace?.Trace("  CRM task: '{0}' -> {1}", ct.GetAttributeValue<string>("msdyn_subject"), ct.Id);
-            }
-
-            // Build name -> actual GUID lookup from CRM tasks
-            // Use a list to handle duplicate names — match in order
-            var crmTasksByName = new Dictionary<string, List<Guid>>(StringComparer.OrdinalIgnoreCase);
-            foreach (var crmTask in crmTasks)
-            {
-                string name = crmTask.GetAttributeValue<string>("msdyn_subject");
-                if (string.IsNullOrEmpty(name)) continue;
-                List<Guid> ids;
-                if (!crmTasksByName.TryGetValue(name, out ids))
-                {
-                    ids = new List<Guid>();
-                    crmTasksByName[name] = ids;
-                }
-                ids.Add(crmTask.Id);
-            }
-
-            var actualTaskIdMap = new Dictionary<int, Guid>();
-            int matched = 0, unmatched = 0, duplicateWarnings = 0;
-            foreach (var mppTask in project.Tasks)
-            {
-                if (!mppTask.UniqueID.HasValue) continue;
-                string name = mppTask.Name ?? "(Unnamed Task)";
-                List<Guid> ids;
-                if (crmTasksByName.TryGetValue(name, out ids) && ids.Count > 0)
-                {
-                    actualTaskIdMap[mppTask.UniqueID.Value] = ids[0];
-                    ids.RemoveAt(0); // consume the match so duplicates map 1:1
-                    matched++;
-                    if (ids.Count > 0) duplicateWarnings++;
-                }
-                else
-                {
-                    unmatched++;
-                    _trace?.Trace("  WARNING: No CRM match for MPP task [{0}] '{1}'", mppTask.UniqueID.Value, name);
-                }
-            }
-            _trace?.Trace("Task matching: {0} matched, {1} unmatched, {2} duplicate-name warnings", matched, unmatched, duplicateWarnings);
-
-            // Build dependency ops using actual CRM GUIDs
+            // Build dependency ops
             // First, query existing dependencies so we don't create duplicates
             var existingDeps = RetrieveExistingDependencies(projectId);
             var seenLinks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -275,12 +220,12 @@ namespace ADC.MppImport.Services
                     if (mppTask.Predecessors == null || mppTask.Predecessors.Count == 0) continue;
 
                     Guid successorId;
-                    if (!actualTaskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
+                    if (!taskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
 
                     foreach (var relation in mppTask.Predecessors)
                     {
                         Guid predecessorId;
-                        if (!actualTaskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
+                        if (!taskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
 
                         // Deduplicate: skip if we've already created this exact link
                         string linkKey = string.Format("{0}|{1}", predecessorId, successorId);
@@ -307,7 +252,7 @@ namespace ADC.MppImport.Services
             else
             {
                 _trace?.Trace("MPP has no predecessor relationships. Auto-creating sequential FS dependencies.");
-                depOps = BuildAutoSequentialDependencyOps(project, projectRef, actualTaskIdMap);
+                depOps = BuildAutoSequentialDependencyOps(project, projectRef, taskIdMap);
             }
 
             result.DependenciesCreated = depOps.Count;
@@ -564,8 +509,8 @@ namespace ADC.MppImport.Services
             entity["msdyn_subject"] = mppTask.Name ?? "(Unnamed Task)";
             entity["msdyn_LinkStatus"] = new OptionSetValue(192350000); // Not Linked
 
-            // Summary tasks (parents): PSS auto-calculates duration/effort from children
-            // Only set duration/effort on leaf tasks
+            // Summary tasks (parents): PSS auto-calculates duration/effort/dates from children
+            // Only set duration/effort/dates on leaf tasks
             if (!mppTask.HasChildTasks)
             {
                 if (mppTask.Duration != null && mppTask.Duration.Value > 0)
@@ -579,6 +524,12 @@ namespace ADC.MppImport.Services
                     double workHours = ConvertToHours(mppTask.Work);
                     entity["msdyn_effort"] = Math.Round(workHours, 2);
                 }
+
+                if (mppTask.Start.HasValue)
+                    entity["msdyn_scheduledstart"] = mppTask.Start.Value;
+
+                if (mppTask.Finish.HasValue)
+                    entity["msdyn_scheduledend"] = mppTask.Finish.Value;
             }
 
             return entity;

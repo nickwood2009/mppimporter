@@ -186,12 +186,35 @@ namespace ADC.MppImport.Services
 
             batchNum = ExecuteOpsBatched(taskAndParentOps, projectId, PSS_BATCH_LIMIT_PHASE, "Tasks", batchNum);
 
-            // Phase 2: Build dependency ops using the pre-generated GUIDs from taskIdMap.
-            // PSS honours the GUIDs we set on PssCreate (msdyn_projecttaskid), so no need to
-            // re-query CRM or match by name — taskIdMap already contains the correct mappings.
-            _trace?.Trace("Building dependencies using {0} pre-generated task GUIDs", taskIdMap.Count);
+            // Phase 2: Query CRM for actual task GUIDs.
+            // PSS reassigns GUIDs during ExecuteOperationSet, so we must query CRM and match
+            // by msdyn_msprojectclientid (= MPP UniqueID) to get the real record IDs.
+            int expectedCount = taskIdMap.Count;
+            List<Entity> crmTasks = null;
+            for (int poll = 0; poll < 10; poll++) // 10 × 5s = 50s max
+            {
+                System.Threading.Thread.Sleep(5000);
+                crmTasks = RetrieveExistingProjectTasks(projectId);
+                _trace?.Trace("Phase 2 poll {0}: {1} CRM tasks found (expecting ~{2})", poll + 1, crmTasks.Count, expectedCount);
+                if (crmTasks.Count >= expectedCount)
+                    break;
+            }
+            _trace?.Trace("CRM tasks after Phase 1: {0} (MPP tasks: {1})", crmTasks.Count, taskIdMap.Count);
 
-            // Build dependency ops
+            // Build actual GUID map by matching msdyn_msprojectclientid -> MPP UniqueID
+            var actualTaskIdMap = new Dictionary<int, Guid>();
+            foreach (var crmTask in crmTasks)
+            {
+                string clientId = crmTask.GetAttributeValue<string>("msdyn_msprojectclientid");
+                int mppUniqueId;
+                if (!string.IsNullOrEmpty(clientId) && int.TryParse(clientId, out mppUniqueId))
+                {
+                    actualTaskIdMap[mppUniqueId] = crmTask.Id;
+                }
+            }
+            _trace?.Trace("ClientId matching: {0} matched out of {1} MPP tasks", actualTaskIdMap.Count, taskIdMap.Count);
+
+            // Build dependency ops using actual CRM GUIDs
             // First, query existing dependencies so we don't create duplicates
             var existingDeps = RetrieveExistingDependencies(projectId);
             var seenLinks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -220,12 +243,12 @@ namespace ADC.MppImport.Services
                     if (mppTask.Predecessors == null || mppTask.Predecessors.Count == 0) continue;
 
                     Guid successorId;
-                    if (!taskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
+                    if (!actualTaskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
 
                     foreach (var relation in mppTask.Predecessors)
                     {
                         Guid predecessorId;
-                        if (!taskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
+                        if (!actualTaskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
 
                         // Deduplicate: skip if we've already created this exact link
                         string linkKey = string.Format("{0}|{1}", predecessorId, successorId);
@@ -252,7 +275,7 @@ namespace ADC.MppImport.Services
             else
             {
                 _trace?.Trace("MPP has no predecessor relationships. Auto-creating sequential FS dependencies.");
-                depOps = BuildAutoSequentialDependencyOps(project, projectRef, taskIdMap);
+                depOps = BuildAutoSequentialDependencyOps(project, projectRef, actualTaskIdMap);
             }
 
             result.DependenciesCreated = depOps.Count;
@@ -508,6 +531,10 @@ namespace ADC.MppImport.Services
             entity["msdyn_projectbucket"] = bucketRef;
             entity["msdyn_subject"] = mppTask.Name ?? "(Unnamed Task)";
             entity["msdyn_LinkStatus"] = new OptionSetValue(192350000); // Not Linked
+
+            // Tag with MPP UniqueID so we can match CRM records back after PSS assigns new GUIDs
+            if (mppTask.UniqueID.HasValue)
+                entity["msdyn_msprojectclientid"] = mppTask.UniqueID.Value.ToString();
 
             // Summary tasks (parents): PSS auto-calculates duration/effort/dates from children
             // Only set duration/effort/dates on leaf tasks

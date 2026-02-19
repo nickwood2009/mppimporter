@@ -525,7 +525,7 @@ namespace ADC.MppImport.Services
             // Only set duration/effort/dates on leaf tasks
             if (!mppTask.HasChildTasks)
             {
-                if (mppTask.Duration != null && mppTask.Duration.Value > 0)
+                if (mppTask.Duration != null && mppTask.Duration.Value >= 0)
                 {
                     double durationHours = ConvertToHours(mppTask.Duration);
                     entity["msdyn_duration"] = Math.Round(durationHours / 8.0, 2);

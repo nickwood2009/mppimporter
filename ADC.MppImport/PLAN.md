@@ -139,3 +139,87 @@ public class ImportMppToProjectActivity : BaseCodeActivity
 - 0 external NuGet dependencies beyond CRM SDK
 - 0 warnings, 0 errors
 - Assembly can be registered via Plugin Registration Tool
+
+---
+
+## Current Status (v1.0.21.0 — 2026-02-19)
+
+### ✅ WORKS — Confirmed in testing
+
+| Feature | Notes |
+|---------|-------|
+| MPP download & parsing | Downloads from `adc_templatemsprojectmppfile`, parses tasks/resources/predecessors correctly |
+| Task creation via PssCreate | Tasks created with correct names, duration, effort. Batched in 200-op operation sets |
+| Task update via PssUpdate | Existing tasks matched by `msdyn_msprojectclientid` and updated |
+| Parent-child hierarchy | Derived from `OutlineLevel` when MPP reader doesn't set `ParentTask`. Parent links set via PssUpdate |
+| Project start date | Set via PssUpdate on `msdyn_project.msdyn_scheduledstart` from workflow input |
+| Operation set batching | 200-op batches, async execution, completion polling (status 192350001 = Completed) |
+| Duplicate dependency detection | Queries existing `msdyn_projecttaskdependency` records and skips duplicates |
+| Workflow activity shell | Thin wrapper with Case Template, Target Project, and optional Starts On inputs |
+| Default bucket creation | Auto-creates project bucket if none exists |
+| Assembly versioning | Incremented on each deploy to avoid CRM caching |
+
+### ❌ DOES NOT WORK — PSS rejects these fields on PssCreate
+
+| Field attempted | Error | Version tested |
+|----------------|-------|----------------|
+| `msdyn_displayorder` | "not a valid column in the table msdyn_projecttask" | 1.0.13 |
+| `msdyn_scheduledstart` / `msdyn_scheduledend` | ScheduleAPI error — PSS calculates these from dependencies/duration | 1.0.18, 1.0.19 |
+| `msdyn_msprojectclientid` | "Input to the column msdyn_msprojectclientid during create operation is not allowed" | 1.0.21 |
+
+### ⚠️ CORE PROBLEM: Task GUID Mapping for Dependencies
+
+**The fundamental issue:** After Phase 1 creates tasks via PssCreate, we need to reference their actual CRM GUIDs to create dependency records in Phase 2. PSS makes this difficult because:
+
+1. **PSS reassigns GUIDs** — Even though we set `entity.Id` and `msdyn_projecttaskid` on PssCreate, PSS assigns its own GUIDs. Our pre-generated GUIDs do NOT match the actual CRM records. Confirmed by error: "Entity msdyn_projecttask with id ... does not exist" (v1.0.20).
+
+2. **Cannot tag tasks with clientId** — `msdyn_msprojectclientid` is read-only on create (v1.0.21 error). We cannot write a custom identifier to match tasks back.
+
+3. **Name matching works but is fragile** — Matching CRM tasks by `msdyn_subject` worked for DA0999 test file (v1.0.12–1.0.17). But fails when:
+   - Duplicate task names exist (consumed in order, but risky)
+   - Phase 2 polling doesn't find tasks in time (Accel1 file: 0 tasks found after 18s)
+
+4. **New projects have longer propagation delay** — For brand-new projects, `WaitForProjectReady` never finds the root task even after 10–60s. Phase 2 polling found 0 tasks after 18s for the Accel1 file, even though the operation set reported "Completed". The DA0999 file worked because tasks appeared within 5s.
+
+### Dependencies end-to-end status
+
+| Test file | Tasks created | Dependencies created | Notes |
+|-----------|--------------|---------------------|-------|
+| DA0999 (23 tasks) | ✅ 23 | ✅ ~20 | Name matching worked, tasks found on first poll |
+| Accel1 (28 tasks) | ✅ 28 | ❌ 0 | Phase 2 polling found 0 CRM tasks → 0 matches → 0 deps |
+
+### What we need to solve
+
+**Option A: Fix name matching + increase polling**
+- Increase Phase 2 polling back to 12×5s = 60s (worked for DA0999)
+- Risk: May still fail for new projects with slow propagation
+- Risk: Duplicate task names cause wrong mappings
+- Total time budget: ~10s init + ~5s batch + ~60s poll + ~5s deps = ~80s (under 120s limit)
+
+**Option B: Include dependencies in same operation set as tasks (Phase 1)**
+- PSS allows referencing tasks by the GUIDs set on PssCreate WITHIN the same operation set
+- Parent links already work this way (same batch as creates)
+- If dependencies are added to the SAME operation set as task creates, PSS should resolve the references internally
+- This eliminates the need for Phase 2 entirely
+- Risk: May exceed 200-op batch limit for large projects (tasks + parents + deps)
+
+**Option C: Use operation set response to get actual GUIDs**
+- The `ExecuteOperationSetV1` response contains a JSON payload with correlation IDs
+- Could potentially extract actual GUIDs from the response
+- Needs investigation of response format
+
+### Key finding from MS docs (v1.0.23)
+
+> "The ID property is optional. If you provide the ID property, the system tries to use it and throws an exception if it can't be used."
+
+This means PSS DOES honour our pre-generated GUIDs. The v1.0.20 error was a **timing issue** (deps submitted before task records were committed), not a GUID mismatch.
+
+### Implemented solution (v1.0.23.0)
+
+Two-phase batching with pre-generated GUIDs — no polling, no name matching:
+
+- **Phase 1**: Task creates (batched at 200). Each task gets a pre-generated GUID via `entity.Id` and `msdyn_projecttaskid`.
+- **10s wait**: Ensures Phase 1 records are committed to DB.
+- **Phase 2**: Parent links + dependencies (batched at 200). References the SAME pre-generated GUIDs from `taskIdMap`.
+
+This scales to any project size. No CRM querying needed between phases.

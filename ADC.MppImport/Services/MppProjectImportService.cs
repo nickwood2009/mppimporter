@@ -164,58 +164,10 @@ namespace ADC.MppImport.Services
 
             _trace?.Trace("Parent links queued: {0}", parentOps.Count);
 
-            // 7. Execute in two phases to ensure tasks exist before dependencies reference them.
-            //    Phase 1: task creates/updates + parent links
-            //    Phase 2: dependency records
-            const int PSS_BATCH_LIMIT_PHASE = 200;
-            int batchNum = 0;
-
-            // Phase 1: project start date (if provided) + task creates/updates + parent links
-            var taskAndParentOps = new List<Action<string>>();
-
-            if (projectStartDate.HasValue)
-            {
-                _trace?.Trace("Setting project start date to {0:yyyy-MM-dd}", projectStartDate.Value);
-                var projectUpdate = new Entity("msdyn_project", projectId);
-                projectUpdate["msdyn_scheduledstart"] = projectStartDate.Value;
-                taskAndParentOps.Add(osId => PssUpdate(projectUpdate, osId));
-            }
-
-            taskAndParentOps.AddRange(taskOps);
-            taskAndParentOps.AddRange(parentOps);
-
-            batchNum = ExecuteOpsBatched(taskAndParentOps, projectId, PSS_BATCH_LIMIT_PHASE, "Tasks", batchNum);
-
-            // Phase 2: Query CRM for actual task GUIDs.
-            // PSS reassigns GUIDs during ExecuteOperationSet, so we must query CRM and match
-            // by msdyn_msprojectclientid (= MPP UniqueID) to get the real record IDs.
-            int expectedCount = taskIdMap.Count;
-            List<Entity> crmTasks = null;
-            for (int poll = 0; poll < 10; poll++) // 10 × 5s = 50s max
-            {
-                System.Threading.Thread.Sleep(5000);
-                crmTasks = RetrieveExistingProjectTasks(projectId);
-                _trace?.Trace("Phase 2 poll {0}: {1} CRM tasks found (expecting ~{2})", poll + 1, crmTasks.Count, expectedCount);
-                if (crmTasks.Count >= expectedCount)
-                    break;
-            }
-            _trace?.Trace("CRM tasks after Phase 1: {0} (MPP tasks: {1})", crmTasks.Count, taskIdMap.Count);
-
-            // Build actual GUID map by matching msdyn_msprojectclientid -> MPP UniqueID
-            var actualTaskIdMap = new Dictionary<int, Guid>();
-            foreach (var crmTask in crmTasks)
-            {
-                string clientId = crmTask.GetAttributeValue<string>("msdyn_msprojectclientid");
-                int mppUniqueId;
-                if (!string.IsNullOrEmpty(clientId) && int.TryParse(clientId, out mppUniqueId))
-                {
-                    actualTaskIdMap[mppUniqueId] = crmTask.Id;
-                }
-            }
-            _trace?.Trace("ClientId matching: {0} matched out of {1} MPP tasks", actualTaskIdMap.Count, taskIdMap.Count);
-
-            // Build dependency ops using actual CRM GUIDs
-            // First, query existing dependencies so we don't create duplicates
+            // 7. Build dependency ops using pre-generated GUIDs from taskIdMap.
+            //    Dependencies are included in the SAME operation set as tasks + parents.
+            //    PSS resolves pre-generated GUIDs within a single operation set
+            //    (proven by parent links already working this way).
             var existingDeps = RetrieveExistingDependencies(projectId);
             var seenLinks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var ed in existingDeps)
@@ -243,14 +195,13 @@ namespace ADC.MppImport.Services
                     if (mppTask.Predecessors == null || mppTask.Predecessors.Count == 0) continue;
 
                     Guid successorId;
-                    if (!actualTaskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
+                    if (!taskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
 
                     foreach (var relation in mppTask.Predecessors)
                     {
                         Guid predecessorId;
-                        if (!actualTaskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
+                        if (!taskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
 
-                        // Deduplicate: skip if we've already created this exact link
                         string linkKey = string.Format("{0}|{1}", predecessorId, successorId);
                         if (!seenLinks.Add(linkKey))
                         {
@@ -275,15 +226,52 @@ namespace ADC.MppImport.Services
             else
             {
                 _trace?.Trace("MPP has no predecessor relationships. Auto-creating sequential FS dependencies.");
-                depOps = BuildAutoSequentialDependencyOps(project, projectRef, actualTaskIdMap);
+                depOps = BuildAutoSequentialDependencyOps(project, projectRef, taskIdMap);
             }
 
             result.DependenciesCreated = depOps.Count;
             _trace?.Trace("Dependencies queued: {0}", depOps.Count);
 
-            // Execute dependencies (batched if > 200)
-            if (depOps.Count > 0)
-                batchNum = ExecuteOpsBatched(depOps, projectId, PSS_BATCH_LIMIT_PHASE, "Dependencies", batchNum);
+            // 8. Execute in two phases so we can scale beyond 200 ops.
+            //    Phase 1: project start date + task creates (batched at 200).
+            //    Phase 2: parent links + dependencies (batched at 200).
+            //    Both phases reference the SAME pre-generated GUIDs from taskIdMap.
+            //    Per MS docs: "If you provide the ID property, the system tries to use it."
+            //    So CRM records keep our GUIDs — Phase 2 can reference them after Phase 1 commits.
+            const int PSS_BATCH_LIMIT = 200;
+            int batchNum = 0;
+
+            // Phase 1: task creates (+ optional project start date)
+            var phase1Ops = new List<Action<string>>();
+
+            if (projectStartDate.HasValue)
+            {
+                _trace?.Trace("Setting project start date to {0:yyyy-MM-dd}", projectStartDate.Value);
+                var projectUpdate = new Entity("msdyn_project", projectId);
+                projectUpdate["msdyn_scheduledstart"] = projectStartDate.Value;
+                phase1Ops.Add(osId => PssUpdate(projectUpdate, osId));
+            }
+
+            phase1Ops.AddRange(taskOps);
+
+            _trace?.Trace("Phase 1: {0} ops (task creates)", phase1Ops.Count);
+            batchNum = ExecuteOpsBatched(phase1Ops, projectId, PSS_BATCH_LIMIT, "Tasks", batchNum);
+
+            // Brief wait to ensure Phase 1 records are committed to DB before Phase 2 references them
+            if (parentOps.Count > 0 || depOps.Count > 0)
+            {
+                _trace?.Trace("Waiting 10s for Phase 1 DB propagation...");
+                System.Threading.Thread.Sleep(10000);
+            }
+
+            // Phase 2: parent links + dependencies (reference pre-generated GUIDs from Phase 1)
+            var phase2Ops = new List<Action<string>>();
+            phase2Ops.AddRange(parentOps);
+            phase2Ops.AddRange(depOps);
+
+            _trace?.Trace("Phase 2: {0} ops (parents={1}, deps={2})", phase2Ops.Count, parentOps.Count, depOps.Count);
+            if (phase2Ops.Count > 0)
+                batchNum = ExecuteOpsBatched(phase2Ops, projectId, PSS_BATCH_LIMIT, "Links", batchNum);
 
             _trace?.Trace("Import complete. {0} batches, Created: {1}, Updated: {2}, Dependencies: {3}",
                 batchNum, result.TasksCreated, result.TasksUpdated, result.DependenciesCreated);
@@ -531,10 +519,6 @@ namespace ADC.MppImport.Services
             entity["msdyn_projectbucket"] = bucketRef;
             entity["msdyn_subject"] = mppTask.Name ?? "(Unnamed Task)";
             entity["msdyn_LinkStatus"] = new OptionSetValue(192350000); // Not Linked
-
-            // Tag with MPP UniqueID so we can match CRM records back after PSS assigns new GUIDs
-            if (mppTask.UniqueID.HasValue)
-                entity["msdyn_msprojectclientid"] = mppTask.UniqueID.Value.ToString();
 
             // Summary tasks (parents): PSS auto-calculates duration/effort/dates from children
             // Only set duration/effort/dates on leaf tasks

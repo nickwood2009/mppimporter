@@ -157,6 +157,7 @@ namespace ADC.MppImport.Services
                 if (!taskIdMap.TryGetValue(mppTask.ParentTask.UniqueID.Value, out parentRecordId)) continue;
 
                 var update = new Entity("msdyn_projecttask", taskRecordId);
+                update["msdyn_project"] = projectRef;
                 update["msdyn_parenttask"] = new EntityReference("msdyn_projecttask", parentRecordId);
                 var capturedUpdate = update;
                 parentOps.Add(osId => PssUpdate(capturedUpdate, osId));

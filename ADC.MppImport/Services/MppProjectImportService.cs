@@ -524,12 +524,6 @@ namespace ADC.MppImport.Services
                     double workHours = ConvertToHours(mppTask.Work);
                     entity["msdyn_effort"] = Math.Round(workHours, 2);
                 }
-
-                if (mppTask.Start.HasValue)
-                    entity["msdyn_scheduledstart"] = mppTask.Start.Value;
-
-                if (mppTask.Finish.HasValue)
-                    entity["msdyn_scheduledend"] = mppTask.Finish.Value;
             }
 
             return entity;

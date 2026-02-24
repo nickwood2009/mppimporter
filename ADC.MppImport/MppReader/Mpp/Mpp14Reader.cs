@@ -381,13 +381,16 @@ namespace ADC.MppImport.MppReader.Mpp
                     m_file.DiagnosticMessages.Add("Fixed2Data: NOT FOUND");
                 }
 
-                // Diagnostic: dump ALL field map entries
-                m_file.DiagnosticMessages.Add(string.Format("FieldMap total entries: {0}", System.Linq.Enumerable.Count(fm.Items)));
-                foreach (var kvp in fm.Items)
+                // Diagnostic: key field map entries only
+                m_file.DiagnosticMessages.Add(string.Format("FieldMap entries: {0}", System.Linq.Enumerable.Count(fm.Items)));
+                int[] kf = { (int)TaskFieldIndex.DurationUnits, (int)TaskFieldIndex.OutlineLevel, (int)TaskFieldIndex.Duration };
+                string[] kn = { "DurationUnits", "OutlineLevel", "Duration" };
+                for (int ki = 0; ki < kf.Length; ki++)
                 {
-                    var fi = kvp.Value;
-                    m_file.DiagnosticMessages.Add(string.Format("  FM[{0}]: Loc={1}, Block={2}, Offset={3}, Cat=0x{4:X2}, VarKey={5}",
-                        kvp.Key, fi.Location, fi.DataBlockIndex, fi.DataBlockOffset, fi.Category, fi.VarDataKey));
+                    var fi = fm.GetFieldItem(kf[ki]);
+                    m_file.DiagnosticMessages.Add(fi != null
+                        ? string.Format("  {0}({1}): Loc={2} Blk={3} Off={4}", kn[ki], kf[ki], fi.Location, fi.DataBlockIndex, fi.DataBlockOffset)
+                        : string.Format("  {0}({1}): NOT IN MAP", kn[ki], kf[ki]));
                 }
 
                 IVarMeta taskVarMeta = null;
@@ -470,31 +473,14 @@ namespace ADC.MppImport.MppReader.Mpp
                     int durationUnitsValue = ReadFixedShortFromBlock(data, data2, fm, (int)TaskFieldIndex.DurationUnits);
                     var durationUnits = MppUtility.GetDurationTimeUnits(durationUnitsValue, properties.DefaultDurationUnits);
 
-                    // Diagnostic: log raw duration info for tasks
+                    // Diagnostic: first 3 real tasks only
+                    if (m_file.DiagnosticMessages.Count < 15)
                     {
                         int rawDur = ReadFixedInt(data, fm, (int)TaskFieldIndex.Duration);
-                        string taskName = taskVarData != null ? ReadVarString(taskVarData, uniqueID, fm, (int)TaskFieldIndex.Name) : "(no vardata)";
                         m_file.DiagnosticMessages.Add(string.Format(
-                            "Task[{0}] '{1}': data.Len={2}, data2={3}, duUnitsRaw={4}, duUnits={5}, rawDur={6}",
-                            uniqueID, taskName ?? "(null)",
-                            data.Length, data2 != null ? data2.Length.ToString() : "null",
-                            durationUnitsValue, durationUnits, rawDur));
-
-                        // Hex dump first 40 bytes of data0 and data2 for first 3 tasks
-                        if (m_file.DiagnosticMessages.Count < 60)
-                        {
-                            int dumpLen = Math.Min(40, data.Length);
-                            var sb = new System.Text.StringBuilder();
-                            for (int b = 0; b < dumpLen; b++) sb.AppendFormat("{0:X2} ", data[b]);
-                            m_file.DiagnosticMessages.Add(string.Format("  data0[0..{0}]: {1}", dumpLen - 1, sb.ToString()));
-                            if (data2 != null)
-                            {
-                                int dumpLen2 = Math.Min(40, data2.Length);
-                                var sb2 = new System.Text.StringBuilder();
-                                for (int b = 0; b < dumpLen2; b++) sb2.AppendFormat("{0:X2} ", data2[b]);
-                                m_file.DiagnosticMessages.Add(string.Format("  data2[0..{0}]: {1}", dumpLen2 - 1, sb2.ToString()));
-                            }
-                        }
+                            "T[{0}]: dLen={1} d2Len={2} duRaw={3} du={4} rawD={5} OL={6}",
+                            uniqueID, data.Length, data2 != null ? data2.Length.ToString() : "X",
+                            durationUnitsValue, durationUnits, rawDur, task.OutlineLevel));
                     }
 
                     int rawDuration = ReadFixedInt(data, fm, (int)TaskFieldIndex.Duration);

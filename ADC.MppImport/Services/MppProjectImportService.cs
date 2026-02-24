@@ -87,17 +87,7 @@ namespace ADC.MppImport.Services
             foreach (var msg in project.DiagnosticMessages)
                 _trace?.Trace("  {0}", msg);
 
-            // Dump full task list with outline levels BEFORE parent derivation
-            _trace?.Trace("=== MPP TASK DUMP (before parent derivation) ===");
-            foreach (var t in sortedByOrder)
-            {
-                string durStr = t.Duration != null ? string.Format("{0} {1}", t.Duration.Value, t.Duration.Units) : "null";
-                string workStr = t.Work != null ? string.Format("{0} {1}", t.Work.Value, t.Work.Units) : "null";
-                string parentStr = t.ParentTask != null ? string.Format("[{0}] '{1}'", t.ParentTask.UniqueID, t.ParentTask.Name) : "(none)";
-                _trace?.Trace("  [{0}] L{1} '{2}' | Parent={3} | Children={4} | Duration={5} | Work={6}",
-                    t.UniqueID.Value, t.OutlineLevel ?? 0, t.Name,
-                    parentStr, t.ChildTasks.Count, durStr, workStr);
-            }
+            // (before-parent-derivation dump removed to save trace space)
             var lastAtLevel = new Dictionary<int, Task>();
             int parentsDerived = 0;
             foreach (var mppTask in sortedByOrder)
@@ -122,19 +112,13 @@ namespace ADC.MppImport.Services
             if (parentsDerived > 0)
                 _trace?.Trace("Derived {0} parent relationships from outline levels", parentsDerived);
 
-            // Dump full task list AFTER parent derivation
-            _trace?.Trace("=== MPP TASK DUMP (after parent derivation) ===");
-            foreach (var t in sortedByOrder)
+            // Compact task dump (first 5 only)
+            _trace?.Trace("=== TASK SAMPLE (first 5 of {0}) ===", sortedByOrder.Count);
+            for (int ti = 0; ti < Math.Min(5, sortedByOrder.Count); ti++)
             {
+                var t = sortedByOrder[ti];
                 string durStr = t.Duration != null ? string.Format("{0} {1}", t.Duration.Value, t.Duration.Units) : "null";
-                string parentStr = t.ParentTask != null ? string.Format("[{0}] '{1}'", t.ParentTask.UniqueID, t.ParentTask.Name) : "(none)";
-                bool isSummary = t.HasChildTasks;
-                double msdynDur = 0;
-                if (!isSummary && t.Duration != null && t.Duration.Value >= 0)
-                    msdynDur = Math.Round(ConvertToHours(t.Duration) / 8.0, 2);
-                _trace?.Trace("  [{0}] L{1} '{2}' | Parent={3} | Summary={4} | Children={5} | Duration={6} | msdyn_duration={7}",
-                    t.UniqueID.Value, t.OutlineLevel ?? 0, t.Name,
-                    parentStr, isSummary, t.ChildTasks.Count, durStr, isSummary ? "(auto)" : msdynDur.ToString());
+                _trace?.Trace("  [{0}] L{1} '{2}' | Dur={3}", t.UniqueID.Value, t.OutlineLevel ?? 0, t.Name, durStr);
             }
 
             // 7. Pre-generate IDs for new tasks; build map of MPP UniqueID -> CRM record GUID

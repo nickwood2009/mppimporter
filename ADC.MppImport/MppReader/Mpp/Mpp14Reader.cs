@@ -362,6 +362,9 @@ namespace ADC.MppImport.MppReader.Mpp
                 if (maxSize < 4) maxSize = 200;
                 var taskFixedData = new FixedData(taskFixedMeta, fixedDataBuf, maxSize);
 
+                var properties = m_file.ProjectProperties;
+                var fm = m_taskFieldMap;
+
                 // Second fixed data block (contains fields like DurationUnits, OutlineLevel)
                 FixedData taskFixed2Data = null;
                 if (fixed2DataBuf != null)
@@ -369,6 +372,30 @@ namespace ADC.MppImport.MppReader.Mpp
                     int maxSize2 = m_taskFieldMap.GetMaxFixedDataSize(1);
                     if (maxSize2 < 4) maxSize2 = 768;
                     taskFixed2Data = new FixedData(taskFixedMeta, fixed2DataBuf, maxSize2);
+                    m_file.DiagnosticMessages.Add(string.Format("Fixed2Data: found, {0} bytes, maxSize2={1}", fixed2DataBuf.Length, maxSize2));
+                }
+                else
+                {
+                    m_file.DiagnosticMessages.Add("Fixed2Data: NOT FOUND");
+                }
+
+                // Diagnostic: dump field map entries for key fields
+                int[] diagFields = new int[] {
+                    (int)TaskFieldIndex.DurationUnits,
+                    (int)TaskFieldIndex.OutlineLevel,
+                    (int)TaskFieldIndex.Duration,
+                    (int)TaskFieldIndex.ParentTaskUniqueID,
+                    (int)TaskFieldIndex.UniqueID
+                };
+                string[] diagNames = new string[] { "DurationUnits", "OutlineLevel", "Duration", "ParentTaskUniqueID", "UniqueID" };
+                for (int d = 0; d < diagFields.Length; d++)
+                {
+                    var fi = fm.GetFieldItem(diagFields[d]);
+                    if (fi != null)
+                        m_file.DiagnosticMessages.Add(string.Format("FieldMap[{0}={1}]: Location={2}, Block={3}, Offset={4}, Category=0x{5:X2}",
+                            diagNames[d], diagFields[d], fi.Location, fi.DataBlockIndex, fi.DataBlockOffset, fi.Category));
+                    else
+                        m_file.DiagnosticMessages.Add(string.Format("FieldMap[{0}={1}]: NOT IN MAP", diagNames[d], diagFields[d]));
                 }
 
                 IVarMeta taskVarMeta = null;
@@ -379,8 +406,6 @@ namespace ADC.MppImport.MppReader.Mpp
                     taskVarData = new Var2Data(taskVarMeta, var2DataBuf);
                 }
 
-                var properties = m_file.ProjectProperties;
-                var fm = m_taskFieldMap;
                 int itemCount = taskFixedMeta.AdjustedItemCount;
 
                 // Build task map: skip first 3 items (not real tasks)
@@ -452,6 +477,17 @@ namespace ADC.MppImport.MppReader.Mpp
                     // Duration — DurationUnits is often in Fixed2Data (block 1)
                     int durationUnitsValue = ReadFixedShortFromBlock(data, data2, fm, (int)TaskFieldIndex.DurationUnits);
                     var durationUnits = MppUtility.GetDurationTimeUnits(durationUnitsValue, properties.DefaultDurationUnits);
+
+                    // Diagnostic: log raw duration info for first 5 real tasks
+                    if (m_file.DiagnosticMessages.Count < 30)
+                    {
+                        int rawDur = ReadFixedInt(data, fm, (int)TaskFieldIndex.Duration);
+                        m_file.DiagnosticMessages.Add(string.Format(
+                            "Task[{0}] '{1}': data.Len={2}, data2={3}, durationUnitsRaw={4}, durationUnits={5}, rawDuration={6}",
+                            uniqueID, ReadVarString(taskVarData, uniqueID, fm, (int)TaskFieldIndex.Name) ?? "(no name)",
+                            data.Length, data2 != null ? data2.Length.ToString() : "null",
+                            durationUnitsValue, durationUnits, rawDur));
+                    }
 
                     int rawDuration = ReadFixedInt(data, fm, (int)TaskFieldIndex.Duration);
                     task.Duration = MppUtility.GetAdjustedDuration(properties, rawDuration, durationUnits);

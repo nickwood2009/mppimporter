@@ -81,6 +81,14 @@ namespace ADC.MppImport.Services
             //    Must run before task entity creation so HasChildTasks is correct for summary detection.
             var sortedByOrder = project.Tasks.Where(t => t.UniqueID.HasValue).ToList(); // preserve MPP file order (= outline order)
 
+            // Dump reader diagnostics
+            if (project.DiagnosticMessages.Count > 0)
+            {
+                _trace?.Trace("=== MPP READER DIAGNOSTICS ===");
+                foreach (var msg in project.DiagnosticMessages)
+                    _trace?.Trace("  {0}", msg);
+            }
+
             // Dump full task list with outline levels BEFORE parent derivation
             _trace?.Trace("=== MPP TASK DUMP (before parent derivation) ===");
             foreach (var t in sortedByOrder)

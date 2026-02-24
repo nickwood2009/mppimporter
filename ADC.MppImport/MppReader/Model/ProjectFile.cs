@@ -16,6 +16,7 @@ namespace ADC.MppImport.MppReader.Model
         public List<ResourceAssignment> Assignments { get; } = new List<ResourceAssignment>();
         public List<ProjectCalendar> Calendars { get; } = new List<ProjectCalendar>();
         public List<Exception> IgnoredErrors { get; } = new List<Exception>();
+        public List<string> DiagnosticMessages { get; } = new List<string>();
 
         public Task GetTaskByUniqueID(int uniqueID)
         {

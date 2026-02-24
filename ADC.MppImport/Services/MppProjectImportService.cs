@@ -80,6 +80,18 @@ namespace ADC.MppImport.Services
             // 6. Derive parent from OutlineLevel for tasks where ParentTask was not set by the MPP reader.
             //    Must run before task entity creation so HasChildTasks is correct for summary detection.
             var sortedByOrder = project.Tasks.Where(t => t.UniqueID.HasValue).ToList(); // preserve MPP file order (= outline order)
+
+            // Dump full task list with outline levels BEFORE parent derivation
+            _trace?.Trace("=== MPP TASK DUMP (before parent derivation) ===");
+            foreach (var t in sortedByOrder)
+            {
+                string durStr = t.Duration != null ? string.Format("{0} {1}", t.Duration.Value, t.Duration.Units) : "null";
+                string workStr = t.Work != null ? string.Format("{0} {1}", t.Work.Value, t.Work.Units) : "null";
+                string parentStr = t.ParentTask != null ? string.Format("[{0}] '{1}'", t.ParentTask.UniqueID, t.ParentTask.Name) : "(none)";
+                _trace?.Trace("  [{0}] L{1} '{2}' | Parent={3} | Children={4} | Duration={5} | Work={6}",
+                    t.UniqueID.Value, t.OutlineLevel ?? 0, t.Name,
+                    parentStr, t.ChildTasks.Count, durStr, workStr);
+            }
             var lastAtLevel = new Dictionary<int, Task>();
             int parentsDerived = 0;
             foreach (var mppTask in sortedByOrder)
@@ -103,6 +115,21 @@ namespace ADC.MppImport.Services
             }
             if (parentsDerived > 0)
                 _trace?.Trace("Derived {0} parent relationships from outline levels", parentsDerived);
+
+            // Dump full task list AFTER parent derivation
+            _trace?.Trace("=== MPP TASK DUMP (after parent derivation) ===");
+            foreach (var t in sortedByOrder)
+            {
+                string durStr = t.Duration != null ? string.Format("{0} {1}", t.Duration.Value, t.Duration.Units) : "null";
+                string parentStr = t.ParentTask != null ? string.Format("[{0}] '{1}'", t.ParentTask.UniqueID, t.ParentTask.Name) : "(none)";
+                bool isSummary = t.HasChildTasks;
+                double msdynDur = 0;
+                if (!isSummary && t.Duration != null && t.Duration.Value >= 0)
+                    msdynDur = Math.Round(ConvertToHours(t.Duration) / 8.0, 2);
+                _trace?.Trace("  [{0}] L{1} '{2}' | Parent={3} | Summary={4} | Children={5} | Duration={6} | msdyn_duration={7}",
+                    t.UniqueID.Value, t.OutlineLevel ?? 0, t.Name,
+                    parentStr, isSummary, t.ChildTasks.Count, durStr, isSummary ? "(auto)" : msdynDur.ToString());
+            }
 
             // 7. Pre-generate IDs for new tasks; build map of MPP UniqueID -> CRM record GUID
             var taskIdMap = new Dictionary<int, Guid>();
@@ -215,16 +242,35 @@ namespace ADC.MppImport.Services
             _trace?.Trace("Task matching: {0} matched out of {1}", actualTaskIdMap.Count, taskIdMap.Count);
 
             // Build parent link ops using actual CRM GUIDs
+            _trace?.Trace("=== PARENT LINK ASSIGNMENTS ===");
             var parentOps = new List<Action<string>>();
             foreach (var mppTask in project.Tasks)
             {
                 if (!mppTask.UniqueID.HasValue) continue;
-                if (mppTask.ParentTask == null || !mppTask.ParentTask.UniqueID.HasValue) continue;
+                if (mppTask.ParentTask == null || !mppTask.ParentTask.UniqueID.HasValue)
+                {
+                    _trace?.Trace("  [{0}] '{1}' -> NO PARENT", mppTask.UniqueID.Value, mppTask.Name);
+                    continue;
+                }
 
                 Guid taskRecordId;
                 Guid parentRecordId;
-                if (!actualTaskIdMap.TryGetValue(mppTask.UniqueID.Value, out taskRecordId)) continue;
-                if (!actualTaskIdMap.TryGetValue(mppTask.ParentTask.UniqueID.Value, out parentRecordId)) continue;
+                if (!actualTaskIdMap.TryGetValue(mppTask.UniqueID.Value, out taskRecordId))
+                {
+                    _trace?.Trace("  [{0}] '{1}' -> SKIP (no CRM GUID for task)", mppTask.UniqueID.Value, mppTask.Name);
+                    continue;
+                }
+                if (!actualTaskIdMap.TryGetValue(mppTask.ParentTask.UniqueID.Value, out parentRecordId))
+                {
+                    _trace?.Trace("  [{0}] '{1}' -> SKIP (no CRM GUID for parent [{2}] '{3}')",
+                        mppTask.UniqueID.Value, mppTask.Name, mppTask.ParentTask.UniqueID.Value, mppTask.ParentTask.Name);
+                    continue;
+                }
+
+                _trace?.Trace("  [{0}] '{1}' -> parent [{2}] '{3}' (task={4}, parent={5})",
+                    mppTask.UniqueID.Value, mppTask.Name,
+                    mppTask.ParentTask.UniqueID.Value, mppTask.ParentTask.Name,
+                    taskRecordId, parentRecordId);
 
                 var update = new Entity("msdyn_projecttask", taskRecordId);
                 update["msdyn_project"] = projectRef;

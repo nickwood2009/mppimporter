@@ -655,11 +655,21 @@ namespace ADC.MppImport.Services
             double val = duration.Value;
             switch (duration.Units)
             {
-                case TimeUnit.Minutes: return val / 60.0;
-                case TimeUnit.Hours: return val;
-                case TimeUnit.Days: return val * 8.0;
-                case TimeUnit.Weeks: return val * 40.0;
-                case TimeUnit.Months: return val * 160.0;
+                case TimeUnit.Minutes:
+                case TimeUnit.ElapsedMinutes:
+                    return val / 60.0;
+                case TimeUnit.Hours:
+                case TimeUnit.ElapsedHours:
+                    return val;
+                case TimeUnit.Days:
+                case TimeUnit.ElapsedDays:
+                    return val * 8.0;
+                case TimeUnit.Weeks:
+                case TimeUnit.ElapsedWeeks:
+                    return val * 40.0;
+                case TimeUnit.Months:
+                case TimeUnit.ElapsedMonths:
+                    return val * 160.0;
                 default: return val;
             }
         }

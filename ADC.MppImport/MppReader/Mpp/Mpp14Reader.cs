@@ -469,8 +469,8 @@ namespace ADC.MppImport.MppReader.Mpp
                     if (parentUniqueID > 0) task.ParentTaskUniqueID = parentUniqueID;
                     task.OutlineLevel = ReadFixedShortFromBlock(data, data2, fm, (int)TaskFieldIndex.OutlineLevel);
 
-                    // Duration — DurationUnits is often in Fixed2Data (block 1)
-                    int durationUnitsValue = ReadFixedShortFromBlock(data, data2, fm, (int)TaskFieldIndex.DurationUnits);
+                    // Duration — DurationUnits may be in VarData or FixedData depending on MPP file
+                    int durationUnitsValue = ReadFieldShort(data, data2, taskVarData, uniqueID, fm, (int)TaskFieldIndex.DurationUnits);
                     var durationUnits = MppUtility.GetDurationTimeUnits(durationUnitsValue, properties.DefaultDurationUnits);
 
                     // Diagnostic: first 3 real tasks only
@@ -785,6 +785,31 @@ namespace ADC.MppImport.MppReader.Mpp
                 if (offset >= 0 && offset + 2 <= targetData.Length)
                     return ByteArrayHelper.GetShort(targetData, offset);
             }
+            return 0;
+        }
+
+        /// <summary>
+        /// Reads a short value from VarData, FixedData block 0, or FixedData block 1
+        /// depending on where the field map says the field lives.
+        /// </summary>
+        private int ReadFieldShort(byte[] data0, byte[] data1, Var2Data varData, int uniqueID, FieldMap fm, int fieldIndex)
+        {
+            var item = fm.GetFieldItem(fieldIndex);
+            if (item == null) return 0;
+
+            if (item.Location == FieldLocation.VarData && varData != null)
+            {
+                return varData.GetShort(uniqueID, item.VarDataKey);
+            }
+
+            if (item.Location == FieldLocation.FixedData)
+            {
+                byte[] targetData = (item.DataBlockIndex == 1 && data1 != null) ? data1 : data0;
+                int offset = item.DataBlockOffset;
+                if (offset >= 0 && offset + 2 <= targetData.Length)
+                    return ByteArrayHelper.GetShort(targetData, offset);
+            }
+
             return 0;
         }
 

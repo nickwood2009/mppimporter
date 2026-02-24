@@ -212,7 +212,7 @@ namespace ADC.MppImport.MppReader.Mpp
                 int varDataKey;
                 if (m_useTypeAsVarDataKey)
                 {
-                    varDataKey = typeValue & 0x0000FFFF;
+                    varDataKey = typeValue;
                 }
                 else
                 {

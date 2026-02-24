@@ -381,18 +381,6 @@ namespace ADC.MppImport.MppReader.Mpp
                     m_file.DiagnosticMessages.Add("Fixed2Data: NOT FOUND");
                 }
 
-                // Diagnostic: key field map entries only
-                m_file.DiagnosticMessages.Add(string.Format("FieldMap entries: {0}", System.Linq.Enumerable.Count(fm.Items)));
-                int[] kf = { (int)TaskFieldIndex.DurationUnits, (int)TaskFieldIndex.OutlineLevel, (int)TaskFieldIndex.Duration };
-                string[] kn = { "DurationUnits", "OutlineLevel", "Duration" };
-                for (int ki = 0; ki < kf.Length; ki++)
-                {
-                    var fi = fm.GetFieldItem(kf[ki]);
-                    m_file.DiagnosticMessages.Add(fi != null
-                        ? string.Format("  {0}({1}): Loc={2} Blk={3} Off={4}", kn[ki], kf[ki], fi.Location, fi.DataBlockIndex, fi.DataBlockOffset)
-                        : string.Format("  {0}({1}): NOT IN MAP", kn[ki], kf[ki]));
-                }
-
                 IVarMeta taskVarMeta = null;
                 Var2Data taskVarData = null;
                 if (varMetaData != null && var2DataBuf != null)
@@ -469,21 +457,27 @@ namespace ADC.MppImport.MppReader.Mpp
                     if (parentUniqueID > 0) task.ParentTaskUniqueID = parentUniqueID;
                     task.OutlineLevel = ReadFixedShortFromBlock(data, data2, fm, (int)TaskFieldIndex.OutlineLevel);
 
-                    // Duration — DurationUnits may be in VarData or FixedData depending on MPP file
+                    // Duration units: try VarData/FixedData first, then infer from date range
                     int durationUnitsValue = ReadFieldShort(data, data2, taskVarData, uniqueID, fm, (int)TaskFieldIndex.DurationUnits);
                     var durationUnits = MppUtility.GetDurationTimeUnits(durationUnitsValue, properties.DefaultDurationUnits);
 
-                    // Diagnostic: first 3 real tasks only
-                    if (m_file.DiagnosticMessages.Count < 15)
-                    {
-                        int rawDur = ReadFixedInt(data, fm, (int)TaskFieldIndex.Duration);
-                        m_file.DiagnosticMessages.Add(string.Format(
-                            "T[{0}]: dLen={1} d2Len={2} duRaw={3} du={4} rawD={5} OL={6}",
-                            uniqueID, data.Length, data2 != null ? data2.Length.ToString() : "X",
-                            durationUnitsValue, durationUnits, rawDur, task.OutlineLevel));
-                    }
-
                     int rawDuration = ReadFixedInt(data, fm, (int)TaskFieldIndex.Duration);
+
+                    // If DurationUnits was not found (defaulted to Days), infer from date range.
+                    // eDays raw = N * 1440 * 10 = N * 14400; Days raw = N * 480 * 10 = N * 4800.
+                    // If rawDuration / 14400 ≈ calendar day span → ElapsedDays.
+                    if (durationUnitsValue == 0 && rawDuration > 0 && task.Start.HasValue && task.Finish.HasValue)
+                    {
+                        double calendarDays = (task.Finish.Value.Date - task.Start.Value.Date).TotalDays;
+                        double eDaysValue = rawDuration / 14400.0;
+                        double roundedEDays = Math.Round(eDaysValue);
+                        // eDays in MPP are whole numbers, so eDaysValue must be near-integer
+                        if (calendarDays > 0 && Math.Abs(eDaysValue - roundedEDays) < 0.01
+                            && Math.Abs(roundedEDays - calendarDays) < 0.5)
+                        {
+                            durationUnits = TimeUnit.ElapsedDays;
+                        }
+                    }
                     task.Duration = MppUtility.GetAdjustedDuration(properties, rawDuration, durationUnits);
 
                     int rawActualDuration = ReadFixedInt(data, fm, (int)TaskFieldIndex.ActualDuration);

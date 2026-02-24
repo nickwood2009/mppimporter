@@ -160,8 +160,7 @@ namespace ADC.MppImport.MppReader.Mpp
 
                     int uniqueID = reader.ReadInt32();
                     int offset = reader.ReadInt32();
-                    int type = reader.ReadInt16() & 0xFFFF;
-                    reader.ReadInt16(); // unknown 2 bytes
+                    int type = reader.ReadInt32();
 
                     if (!m_table.TryGetValue(uniqueID, out var map))
                     {

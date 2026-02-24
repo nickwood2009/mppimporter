@@ -168,18 +168,30 @@ namespace ADC.MppImport.Test
                         Console.WriteLine("  ERR: {0}", err.Message);
                 }
 
+                // Dump reader diagnostics
+                if (project.DiagnosticMessages.Count > 0)
+                {
+                    Console.WriteLine();
+                    Console.WriteLine("--- Reader Diagnostics ---");
+                    foreach (var msg in project.DiagnosticMessages)
+                        Console.WriteLine("  {0}", msg);
+                }
+
                 Console.WriteLine();
                 Console.WriteLine("--- Tasks ---");
                 int shown = 0;
                 foreach (var t in project.Tasks)
                 {
-                    if (shown++ >= 20) { Console.WriteLine("  ... ({0} more)", project.Tasks.Count - 20); break; }
+                    if (shown++ >= 50) { Console.WriteLine("  ... ({0} more)", project.Tasks.Count - 50); break; }
                     string preds = t.Predecessors.Count > 0
                         ? string.Join(",", t.Predecessors.Select(p => p.SourceTaskUniqueID + "(" + p.Type + ")"))
                         : "";
-                    Console.WriteLine("  [{0,3}] {1,-40} Start={2:d}  Dur={3,-12} Pred={4}",
-                        t.UniqueID, Trunc(t.Name, 40),
-                        t.Start, t.Duration, preds);
+                    string durStr = t.Duration != null
+                        ? string.Format("{0} {1}", t.Duration.Value, t.Duration.Units)
+                        : "null";
+                    Console.WriteLine("  [{0,3}] L{1} {2,-40} Start={3:d}  Dur={4,-18} Pred={5}",
+                        t.UniqueID, t.OutlineLevel, Trunc(t.Name, 40),
+                        t.Start, durStr, preds);
                 }
 
                 if (project.Resources.Count > 0)

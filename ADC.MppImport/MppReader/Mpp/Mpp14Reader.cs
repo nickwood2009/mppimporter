@@ -353,6 +353,7 @@ namespace ADC.MppImport.MppReader.Mpp
                 byte[] var2DataBuf = MppFileReader.GetStreamData(taskDir, "Var2Data");
                 byte[] fixedMetaData = MppFileReader.GetStreamData(taskDir, "FixedMeta");
                 byte[] fixedDataBuf = MppFileReader.GetStreamData(taskDir, "FixedData");
+                byte[] fixed2DataBuf = MppFileReader.GetStreamData(taskDir, "Fixed2Data");
 
                 if (fixedMetaData == null || fixedDataBuf == null) return;
 
@@ -360,6 +361,15 @@ namespace ADC.MppImport.MppReader.Mpp
                 int maxSize = m_taskFieldMap.GetMaxFixedDataSize(0);
                 if (maxSize < 4) maxSize = 200;
                 var taskFixedData = new FixedData(taskFixedMeta, fixedDataBuf, maxSize);
+
+                // Second fixed data block (contains fields like DurationUnits, OutlineLevel)
+                FixedData taskFixed2Data = null;
+                if (fixed2DataBuf != null)
+                {
+                    int maxSize2 = m_taskFieldMap.GetMaxFixedDataSize(1);
+                    if (maxSize2 < 4) maxSize2 = 768;
+                    taskFixed2Data = new FixedData(taskFixedMeta, fixed2DataBuf, maxSize2);
+                }
 
                 IVarMeta taskVarMeta = null;
                 Var2Data taskVarData = null;
@@ -403,6 +413,7 @@ namespace ADC.MppImport.MppReader.Mpp
 
                     byte[] data = taskFixedData.GetByteArrayValue(index);
                     if (data == null) continue;
+                    byte[] data2 = taskFixed2Data != null ? taskFixed2Data.GetByteArrayValue(index) : null;
 
                     // Null/placeholder tasks
                     if (data.Length == NULL_TASK_BLOCK_SIZE)
@@ -436,10 +447,10 @@ namespace ADC.MppImport.MppReader.Mpp
                     // Hierarchy
                     int parentUniqueID = ReadFixedInt(data, fm, (int)TaskFieldIndex.ParentTaskUniqueID);
                     if (parentUniqueID > 0) task.ParentTaskUniqueID = parentUniqueID;
-                    task.OutlineLevel = ReadFixedShort(data, fm, (int)TaskFieldIndex.OutlineLevel);
+                    task.OutlineLevel = ReadFixedShortFromBlock(data, data2, fm, (int)TaskFieldIndex.OutlineLevel);
 
-                    // Duration
-                    int durationUnitsValue = ReadFixedShort(data, fm, (int)TaskFieldIndex.DurationUnits);
+                    // Duration — DurationUnits is often in Fixed2Data (block 1)
+                    int durationUnitsValue = ReadFixedShortFromBlock(data, data2, fm, (int)TaskFieldIndex.DurationUnits);
                     var durationUnits = MppUtility.GetDurationTimeUnits(durationUnitsValue, properties.DefaultDurationUnits);
 
                     int rawDuration = ReadFixedInt(data, fm, (int)TaskFieldIndex.Duration);
@@ -728,6 +739,23 @@ namespace ADC.MppImport.MppReader.Mpp
             if (offset < 0) offset = defaultOffset;
             if (offset < 0 || offset + 2 > data.Length) return 0;
             return ByteArrayHelper.GetShort(data, offset);
+        }
+
+        /// <summary>
+        /// Reads a short from the correct data block (block 0 or block 1) based on the field map.
+        /// Falls back to block 0 if block 1 is not available.
+        /// </summary>
+        private int ReadFixedShortFromBlock(byte[] data0, byte[] data1, FieldMap fm, int fieldIndex)
+        {
+            var item = fm.GetFieldItem(fieldIndex);
+            if (item != null && item.Location == FieldLocation.FixedData)
+            {
+                byte[] targetData = (item.DataBlockIndex == 1 && data1 != null) ? data1 : data0;
+                int offset = item.DataBlockOffset;
+                if (offset >= 0 && offset + 2 <= targetData.Length)
+                    return ByteArrayHelper.GetShort(targetData, offset);
+            }
+            return 0;
         }
 
         private double ReadFixedDouble(byte[] data, FieldMap fm, int fieldIndex, int defaultOffset = -1)

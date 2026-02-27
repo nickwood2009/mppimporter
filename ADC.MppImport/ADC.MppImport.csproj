@@ -9,9 +9,11 @@
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>ADC.MppImport</RootNamespace>
     <AssemblyName>ADC.MppImport</AssemblyName>
-    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.6.2</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <Deterministic>true</Deterministic>
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>ADC.MppImport.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -87,7 +89,11 @@
     <Compile Include="Shared\BaseCodeActivity.cs" />
     <Compile Include="Shared\SDKHelpers.cs" />
     <Compile Include="Services\MppProjectImportService.cs" />
+    <Compile Include="Services\MppImportJobData.cs" />
+    <Compile Include="Services\MppAsyncImportService.cs" />
+    <Compile Include="Plugins\MppImportJobPlugin.cs" />
     <Compile Include="Workflows\ImportMppToProjectActivity.cs" />
+    <Compile Include="Workflows\StartMppImportActivity.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

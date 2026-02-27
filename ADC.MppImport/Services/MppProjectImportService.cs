@@ -29,8 +29,6 @@ namespace ADC.MppImport.Services
         /// </summary>
         public ImportResult Execute(Guid caseTemplateId, Guid projectId, DateTime? projectStartDate = null)
         {
-            var result = new ImportResult();
-
             // 1. Download the MPP file bytes from the case template file field
             _trace?.Trace("Downloading MPP file from adc_adccasetemplate {0}...", caseTemplateId);
             byte[] mppBytes = DownloadFileColumn(caseTemplateId, "adc_adccasetemplate", "adc_templatefile");
@@ -39,7 +37,20 @@ namespace ADC.MppImport.Services
 
             _trace?.Trace("MPP file downloaded: {0} bytes", mppBytes.Length);
 
-            // 2. Parse the MPP file
+            return ExecuteFromBytes(mppBytes, projectId, projectStartDate);
+        }
+
+        /// <summary>
+        /// Overload that accepts raw MPP file bytes directly (for testing without a case template).
+        /// </summary>
+        public ImportResult ExecuteFromBytes(byte[] mppBytes, Guid projectId, DateTime? projectStartDate = null)
+        {
+            if (mppBytes == null || mppBytes.Length == 0)
+                throw new ArgumentException("MPP file bytes are empty.");
+
+            var result = new ImportResult();
+
+            // Parse the MPP file
             var reader = new MppFileReader();
             ProjectFile project = reader.Read(mppBytes);
             _trace?.Trace("MPP parsed: {0} tasks, {1} resources", project.Tasks.Count, project.Resources.Count);
@@ -79,7 +90,11 @@ namespace ADC.MppImport.Services
 
             // 6. Derive parent from OutlineLevel for tasks where ParentTask was not set by the MPP reader.
             //    Must run before task entity creation so HasChildTasks is correct for summary detection.
-            var sortedByOrder = project.Tasks.Where(t => t.UniqueID.HasValue).ToList(); // preserve MPP file order (= outline order)
+            // Filter out the MPP project summary task (UniqueID 0, outline level 0) — it represents the
+            // project itself, not a real task. PSS already creates its own root task for the project.
+            var sortedByOrder = project.Tasks
+                .Where(t => t.UniqueID.HasValue && t.UniqueID.Value != 0)
+                .ToList(); // preserve MPP file order (= outline order)
 
             // Dump reader diagnostics
             _trace?.Trace("=== MPP READER DIAGNOSTICS ===");
@@ -112,6 +127,68 @@ namespace ADC.MppImport.Services
             if (parentsDerived > 0)
                 _trace?.Trace("Derived {0} parent relationships from outline levels", parentsDerived);
 
+            // D365 Project Operations supports max 10 outline levels (1-10 for user tasks,
+            // 0 is the PSS root). Compute actual depth from parent chain (OutlineLevel can be null)
+            // and reparent any task deeper than 10 to cap at level 10.
+            const int MAX_DEPTH = 10;
+            var depthCache = new Dictionary<int, int>(); // UniqueID -> depth
+            int tasksCapped = 0;
+
+            // Helper: compute depth by walking parent chain (depth 1 = top-level, no parent)
+            foreach (var mppTask in sortedByOrder)
+            {
+                if (!mppTask.UniqueID.HasValue) continue;
+                int depth = 1;
+                var p = mppTask.ParentTask;
+                while (p != null && p.UniqueID.HasValue && p.UniqueID.Value != 0)
+                {
+                    depth++;
+                    p = p.ParentTask;
+                }
+                depthCache[mppTask.UniqueID.Value] = depth;
+            }
+
+            // Log max depth found for diagnostics
+            int maxDepthFound = depthCache.Count > 0 ? depthCache.Values.Max() : 0;
+            _trace?.Trace("Max parent chain depth: {0} (limit={1})", maxDepthFound, MAX_DEPTH);
+            if (maxDepthFound > MAX_DEPTH)
+            {
+                foreach (var kvp in depthCache.Where(kv => kv.Value > MAX_DEPTH).Take(5))
+                {
+                    var t = sortedByOrder.FirstOrDefault(x => x.UniqueID.HasValue && x.UniqueID.Value == kvp.Key);
+                    _trace?.Trace("  Deep task [{0}] '{1}' depth={2}", kvp.Key, t?.Name ?? "?", kvp.Value);
+                }
+            }
+
+            foreach (var mppTask in sortedByOrder)
+            {
+                if (!mppTask.UniqueID.HasValue) continue;
+                int depth;
+                if (!depthCache.TryGetValue(mppTask.UniqueID.Value, out depth)) continue;
+                if (depth <= MAX_DEPTH || mppTask.ParentTask == null) continue;
+
+                // Walk up to find ancestor at depth MAX_DEPTH - 1 (so this task becomes depth MAX_DEPTH)
+                var ancestor = mppTask.ParentTask;
+                while (ancestor != null && ancestor.UniqueID.HasValue)
+                {
+                    int ancestorDepth;
+                    if (depthCache.TryGetValue(ancestor.UniqueID.Value, out ancestorDepth) && ancestorDepth < MAX_DEPTH)
+                        break;
+                    ancestor = ancestor.ParentTask;
+                }
+                if (ancestor != null)
+                {
+                    _trace?.Trace("  Capping [{0}] '{1}' from depth {2} -> {3} (parent [{4}] '{5}')",
+                        mppTask.UniqueID.Value, mppTask.Name, depth, MAX_DEPTH,
+                        ancestor.UniqueID.Value, ancestor.Name);
+                    mppTask.ParentTask = ancestor;
+                    depthCache[mppTask.UniqueID.Value] = MAX_DEPTH;
+                    tasksCapped++;
+                }
+            }
+            if (tasksCapped > 0)
+                _trace?.Trace("Capped {0} tasks from exceeding max depth {1}", tasksCapped, MAX_DEPTH);
+
             // Compact task dump (first 5 only)
             _trace?.Trace("=== TASK SAMPLE (first 5 of {0}) ===", sortedByOrder.Count);
             for (int ti = 0; ti < Math.Min(5, sortedByOrder.Count); ti++)
@@ -121,13 +198,28 @@ namespace ADC.MppImport.Services
                 _trace?.Trace("  [{0}] L{1} '{2}' | Dur={3}", t.UniqueID.Value, t.OutlineLevel ?? 0, t.Name, durStr);
             }
 
-            // 7. Pre-generate IDs for new tasks; build map of MPP UniqueID -> CRM record GUID
+            // 7. Build reliable summary-task set from ParentTask references.
+            //    HasChildTasks depends on ChildTasks being populated, which doesn't happen
+            //    when parent derivation is skipped (e.g. OutlineLevel = 0 for all tasks).
+            var summaryTaskIds = new HashSet<int>();
+            foreach (var mppTask in sortedByOrder)
+            {
+                if (mppTask.ParentTask != null && mppTask.ParentTask.UniqueID.HasValue
+                    && mppTask.ParentTask.UniqueID.Value != 0)
+                    summaryTaskIds.Add(mppTask.ParentTask.UniqueID.Value);
+            }
+            _trace?.Trace("Summary tasks (from parent refs): {0}", summaryTaskIds.Count);
+
+            // Pre-generate IDs for new tasks; build map of MPP UniqueID -> CRM record GUID
             var taskIdMap = new Dictionary<int, Guid>();
 
             // Collect all task operations first to allow batching
             var taskOps = new List<Action<string>>();
 
-            // First pass: queue PssCreate or PssUpdate for each task (sorted by MPP ID for correct display order)
+            // First pass: queue PssCreate or PssUpdate for each task (sorted by MPP ID for correct display order).
+            // Parent links are set here using pre-generated GUIDs as correlation IDs
+            // (PSS honours these within the SAME operation set; PssUpdate in a separate op set is silently ignored).
+            int parentLinksSet = 0;
             foreach (var mppTask in sortedByOrder)
             {
                 if (!mppTask.UniqueID.HasValue) continue;
@@ -136,7 +228,26 @@ namespace ADC.MppImport.Services
                 Entity existing = null;
                 existingByClientId.TryGetValue(clientId, out existing);
 
-                Entity taskEntity = MapMppTaskToEntity(mppTask, projectRef, bucketRef);
+                bool isSummary = summaryTaskIds.Contains(mppTask.UniqueID.Value);
+                Entity taskEntity = MapMppTaskToEntity(mppTask, projectRef, bucketRef, isSummary);
+
+                // Set explicit outline level from computed depth — helps PSS when MPP
+                // OutlineLevels are all 0 (reader didn't populate them)
+                int taskDepth;
+                if (depthCache.TryGetValue(mppTask.UniqueID.Value, out taskDepth))
+                    taskEntity["msdyn_outlinelevel"] = taskDepth;
+
+                // Set parent link using pre-generated GUID (parents are already in taskIdMap
+                // because sortedByOrder is in outline order = parents before children)
+                if (mppTask.ParentTask != null && mppTask.ParentTask.UniqueID.HasValue)
+                {
+                    Guid parentGuid;
+                    if (taskIdMap.TryGetValue(mppTask.ParentTask.UniqueID.Value, out parentGuid))
+                    {
+                        taskEntity["msdyn_parenttask"] = new EntityReference("msdyn_projecttask", parentGuid);
+                        parentLinksSet++;
+                    }
+                }
 
                 if (existing != null)
                 {
@@ -160,11 +271,13 @@ namespace ADC.MppImport.Services
                     _trace?.Trace("  Queued CREATE for task [{0}] {1} -> {2}", mppTask.UniqueID.Value, mppTask.Name, newId);
                 }
             }
+            _trace?.Trace("Parent links set in Phase 1: {0}", parentLinksSet);
 
-            // 7. Execute in two phases. PSS does NOT honour pre-generated GUIDs across
-            //    operation sets, so parent links and dependencies need actual CRM GUIDs.
-            //    Phase 1: task creates only (no cross-references — safe to batch at any size).
-            //    Phase 2: poll CRM for actual GUIDs, then parent links + dependencies.
+            // 7. Execute in two phases.
+            //    Phase 1: task creates WITH parent links (pre-generated GUIDs work as
+            //             correlation IDs within the same operation set).
+            //    Phase 2: poll CRM for actual GUIDs, then dependencies only
+            //             (deps reference two tasks and must use real CRM GUIDs).
             const int PSS_BATCH_LIMIT = 200;
             int batchNum = 0;
 
@@ -188,7 +301,11 @@ namespace ADC.MppImport.Services
             //          parent links + dependencies using real CRM record IDs.
             int expectedCount = taskIdMap.Count;
             List<Entity> crmTasks = null;
-            for (int poll = 0; poll < 10; poll++) // 10 × 5s = 50s max
+            // Scale poll attempts with task count: PSS takes longer for larger batches
+            // ~40s for 23 tasks, so budget ~2s per task, min 15 polls, max 24 (120s)
+            int maxPolls = Math.Max(15, Math.Min(24, expectedCount / 2));
+            _trace?.Trace("Phase 2: polling for {0} tasks (max {1} polls, {2}s)", expectedCount, maxPolls, maxPolls * 5);
+            for (int poll = 0; poll < maxPolls; poll++)
             {
                 System.Threading.Thread.Sleep(5000);
                 crmTasks = RetrieveExistingProjectTasks(projectId);
@@ -231,45 +348,6 @@ namespace ADC.MppImport.Services
             }
             _trace?.Trace("Task matching: {0} matched out of {1}", actualTaskIdMap.Count, taskIdMap.Count);
 
-            // Build parent link ops using actual CRM GUIDs
-            _trace?.Trace("=== PARENT LINK ASSIGNMENTS ===");
-            var parentOps = new List<Action<string>>();
-            foreach (var mppTask in project.Tasks)
-            {
-                if (!mppTask.UniqueID.HasValue) continue;
-                if (mppTask.ParentTask == null || !mppTask.ParentTask.UniqueID.HasValue)
-                {
-                    _trace?.Trace("  [{0}] '{1}' -> NO PARENT", mppTask.UniqueID.Value, mppTask.Name);
-                    continue;
-                }
-
-                Guid taskRecordId;
-                Guid parentRecordId;
-                if (!actualTaskIdMap.TryGetValue(mppTask.UniqueID.Value, out taskRecordId))
-                {
-                    _trace?.Trace("  [{0}] '{1}' -> SKIP (no CRM GUID for task)", mppTask.UniqueID.Value, mppTask.Name);
-                    continue;
-                }
-                if (!actualTaskIdMap.TryGetValue(mppTask.ParentTask.UniqueID.Value, out parentRecordId))
-                {
-                    _trace?.Trace("  [{0}] '{1}' -> SKIP (no CRM GUID for parent [{2}] '{3}')",
-                        mppTask.UniqueID.Value, mppTask.Name, mppTask.ParentTask.UniqueID.Value, mppTask.ParentTask.Name);
-                    continue;
-                }
-
-                _trace?.Trace("  [{0}] '{1}' -> parent [{2}] '{3}' (task={4}, parent={5})",
-                    mppTask.UniqueID.Value, mppTask.Name,
-                    mppTask.ParentTask.UniqueID.Value, mppTask.ParentTask.Name,
-                    taskRecordId, parentRecordId);
-
-                var update = new Entity("msdyn_projecttask", taskRecordId);
-                update["msdyn_project"] = projectRef;
-                update["msdyn_parenttask"] = new EntityReference("msdyn_projecttask", parentRecordId);
-                var capturedUpdate = update;
-                parentOps.Add(osId => PssUpdate(capturedUpdate, osId));
-            }
-            _trace?.Trace("Parent links queued: {0}", parentOps.Count);
-
             // Build dependency ops using actual CRM GUIDs
             var existingDeps = RetrieveExistingDependencies(projectId);
             var seenLinks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -281,12 +359,62 @@ namespace ADC.MppImport.Services
                     seenLinks.Add(string.Format("{0}|{1}", predRef.Id, succRef.Id));
             }
 
+            // PSS rejects deps on summary tasks — transform them to leaf-task equivalents
+            _trace?.Trace("Summary tasks (have children): {0}", summaryTaskIds.Count);
+
+            // Build parent → children map for resolving summary deps
+            var childrenOfMap = new Dictionary<int, List<int>>();
+            foreach (var t in project.Tasks)
+            {
+                if (!t.UniqueID.HasValue || t.UniqueID.Value == 0) continue;
+                if (t.ParentTask != null && t.ParentTask.UniqueID.HasValue && t.ParentTask.UniqueID.Value != 0)
+                {
+                    int parentId = t.ParentTask.UniqueID.Value;
+                    List<int> list;
+                    if (!childrenOfMap.TryGetValue(parentId, out list))
+                    {
+                        list = new List<int>();
+                        childrenOfMap[parentId] = list;
+                    }
+                    list.Add(t.UniqueID.Value);
+                }
+            }
+
+            // Build predecessor/successor maps from leaf-to-leaf deps for entry/exit analysis
+            var predecessorMap = new Dictionary<int, List<int>>();
+            var successorMap = new Dictionary<int, List<int>>();
+            foreach (var t in project.Tasks)
+            {
+                if (!t.UniqueID.HasValue || t.UniqueID.Value == 0) continue;
+                if (t.Predecessors == null) continue;
+                foreach (var rel in t.Predecessors)
+                {
+                    if (rel.SourceTaskUniqueID == 0) continue;
+                    if (summaryTaskIds.Contains(rel.SourceTaskUniqueID) || summaryTaskIds.Contains(t.UniqueID.Value))
+                        continue; // only leaf-to-leaf
+                    List<int> list;
+                    if (!predecessorMap.TryGetValue(t.UniqueID.Value, out list))
+                    {
+                        list = new List<int>();
+                        predecessorMap[t.UniqueID.Value] = list;
+                    }
+                    list.Add(rel.SourceTaskUniqueID);
+                    if (!successorMap.TryGetValue(rel.SourceTaskUniqueID, out list))
+                    {
+                        list = new List<int>();
+                        successorMap[rel.SourceTaskUniqueID] = list;
+                    }
+                    list.Add(t.UniqueID.Value);
+                }
+            }
+
             int totalMppPredecessors = 0;
             foreach (var t in project.Tasks)
                 totalMppPredecessors += (t.Predecessors != null ? t.Predecessors.Count : 0);
 
             var depOps = new List<Action<string>>();
             int duplicatesSkipped = 0;
+            int summaryDepsTransformed = 0;
 
             if (totalMppPredecessors > 0)
             {
@@ -296,34 +424,64 @@ namespace ADC.MppImport.Services
                     if (!mppTask.UniqueID.HasValue) continue;
                     if (mppTask.Predecessors == null || mppTask.Predecessors.Count == 0) continue;
 
-                    Guid successorId;
-                    if (!actualTaskIdMap.TryGetValue(mppTask.UniqueID.Value, out successorId)) continue;
-
                     foreach (var relation in mppTask.Predecessors)
                     {
-                        Guid predecessorId;
-                        if (!actualTaskIdMap.TryGetValue(relation.SourceTaskUniqueID, out predecessorId)) continue;
+                        if (relation.SourceTaskUniqueID == 0) continue;
 
-                        string linkKey = string.Format("{0}|{1}", predecessorId, successorId);
-                        if (!seenLinks.Add(linkKey))
+                        int predUid = relation.SourceTaskUniqueID;
+                        int succUid = mppTask.UniqueID.Value;
+                        bool predIsSummary = summaryTaskIds.Contains(predUid);
+                        bool succIsSummary = summaryTaskIds.Contains(succUid);
+                        int linkType = MapRelationType(relation.Type);
+
+                        // Resolve summary endpoints to entry/exit leaf tasks
+                        List<int> predIds = predIsSummary
+                            ? GetExitLeaves(predUid, childrenOfMap, summaryTaskIds, successorMap)
+                            : new List<int> { predUid };
+                        List<int> succIds = succIsSummary
+                            ? GetEntryLeaves(succUid, childrenOfMap, summaryTaskIds, predecessorMap)
+                            : new List<int> { succUid };
+
+                        if (predIsSummary || succIsSummary)
                         {
-                            duplicatesSkipped++;
-                            continue;
+                            summaryDepsTransformed++;
+                            _trace?.Trace("  Summary dep [{0}]->[{1}] → {2} pred x {3} succ leaf deps",
+                                predUid, succUid, predIds.Count, succIds.Count);
                         }
 
-                        var dep = new Entity("msdyn_projecttaskdependency");
-                        dep.Id = Guid.NewGuid();
-                        dep["msdyn_projecttaskdependencyid"] = dep.Id;
-                        dep["msdyn_project"] = projectRef;
-                        dep["msdyn_predecessortask"] = new EntityReference("msdyn_projecttask", predecessorId);
-                        dep["msdyn_successortask"] = new EntityReference("msdyn_projecttask", successorId);
-                        dep["msdyn_linktype"] = new OptionSetValue(MapRelationType(relation.Type));
-                        var capturedDep = dep;
-                        depOps.Add(osId => PssCreate(capturedDep, osId));
+                        foreach (var pId in predIds)
+                        {
+                            foreach (var sId in succIds)
+                            {
+                                if (pId == sId) continue;
+                                Guid predecessorGuid, successorGuid;
+                                if (!actualTaskIdMap.TryGetValue(pId, out predecessorGuid)) continue;
+                                if (!actualTaskIdMap.TryGetValue(sId, out successorGuid)) continue;
+
+                                string linkKey = string.Format("{0}|{1}", predecessorGuid, successorGuid);
+                                if (!seenLinks.Add(linkKey))
+                                {
+                                    duplicatesSkipped++;
+                                    continue;
+                                }
+
+                                var dep = new Entity("msdyn_projecttaskdependency");
+                                dep.Id = Guid.NewGuid();
+                                dep["msdyn_projecttaskdependencyid"] = dep.Id;
+                                dep["msdyn_project"] = projectRef;
+                                dep["msdyn_predecessortask"] = new EntityReference("msdyn_projecttask", predecessorGuid);
+                                dep["msdyn_successortask"] = new EntityReference("msdyn_projecttask", successorGuid);
+                                dep["msdyn_linktype"] = new OptionSetValue(linkType);
+                                var capturedDep = dep;
+                                depOps.Add(osId => PssCreate(capturedDep, osId));
+                            }
+                        }
                     }
                 }
                 if (duplicatesSkipped > 0)
                     _trace?.Trace("Skipped {0} duplicate dependency links", duplicatesSkipped);
+                if (summaryDepsTransformed > 0)
+                    _trace?.Trace("Transformed {0} summary deps to leaf-task deps", summaryDepsTransformed);
             }
             else
             {
@@ -331,16 +489,22 @@ namespace ADC.MppImport.Services
                 depOps = BuildAutoSequentialDependencyOps(project, projectRef, actualTaskIdMap);
             }
 
-            // Execute Phase 2: parent links + dependencies (all using actual CRM GUIDs)
-            var phase2Ops = new List<Action<string>>();
-            phase2Ops.AddRange(parentOps);
-            phase2Ops.AddRange(depOps);
-
+            // Execute Phase 2: dependencies (fault-tolerant — log and continue on failure)
+            // Parent links were already set in Phase 1 PssCreate.
             result.DependenciesCreated = depOps.Count;
-            _trace?.Trace("Phase 2: {0} ops (parents={1}, deps={2})", phase2Ops.Count, parentOps.Count, depOps.Count);
-
-            if (phase2Ops.Count > 0)
-                batchNum = ExecuteOpsBatched(phase2Ops, projectId, PSS_BATCH_LIMIT, "Links", batchNum);
+            _trace?.Trace("Phase 2b: {0} dependency ops", depOps.Count);
+            if (depOps.Count > 0)
+            {
+                try
+                {
+                    batchNum = ExecuteOpsBatched(depOps, projectId, PSS_BATCH_LIMIT, "Deps", batchNum);
+                }
+                catch (Exception depEx)
+                {
+                    _trace?.Trace("WARNING: Dependency batch failed — tasks and hierarchy are intact. Error: {0}", depEx.Message);
+                    result.DependenciesCreated = 0;
+                }
+            }
 
             _trace?.Trace("Import complete. {0} batches, Created: {1}, Updated: {2}, Dependencies: {3}",
                 batchNum, result.TasksCreated, result.TasksUpdated, result.DependenciesCreated);
@@ -458,7 +622,7 @@ namespace ADC.MppImport.Services
                 try
                 {
                     var osRecord = _service.Retrieve("msdyn_operationset", osId,
-                        new ColumnSet(true));
+                        new ColumnSet("msdyn_status", "statuscode", "msdyn_description"));
 
                     // Try multiple possible status field names for compatibility
                     int status = -1;
@@ -563,15 +727,13 @@ namespace ADC.MppImport.Services
             if (!Guid.TryParse(operationSetId, out osId)) return;
 
             var osRecord = _service.Retrieve("msdyn_operationset", osId,
-                new ColumnSet(true));
+                new ColumnSet("msdyn_status", "statuscode", "msdyn_description"));
 
             foreach (var attr in osRecord.Attributes)
             {
-                _trace?.Trace("  OperationSet.{0} = {1}", attr.Key, attr.Value);
+                string val = attr.Value is OptionSetValue osv ? osv.Value.ToString() : (attr.Value?.ToString() ?? "(null)");
+                _trace?.Trace("  OperationSet.{0} = {1}", attr.Key, val);
             }
-
-            // Also check for failed operation set detail records
-            // Detail query removed — field name varies across environments
         }
 
         #endregion
@@ -581,7 +743,7 @@ namespace ADC.MppImport.Services
         /// <summary>
         /// Maps an MPP Task to a msdyn_projecttask Entity for create/update.
         /// </summary>
-        private Entity MapMppTaskToEntity(Task mppTask, EntityReference projectRef, EntityReference bucketRef)
+        private Entity MapMppTaskToEntity(Task mppTask, EntityReference projectRef, EntityReference bucketRef, bool isSummary = false)
         {
             var entity = new Entity("msdyn_projecttask");
             entity["msdyn_project"] = projectRef;
@@ -590,8 +752,10 @@ namespace ADC.MppImport.Services
             entity["msdyn_LinkStatus"] = new OptionSetValue(192350000); // Not Linked
 
             // Summary tasks (parents): PSS auto-calculates duration/effort/dates from children
-            // Only set duration/effort/dates on leaf tasks
-            if (!mppTask.HasChildTasks)
+            // Only set duration/effort/dates on leaf tasks.
+            // Use the isSummary flag (built from ParentTask refs) rather than HasChildTasks,
+            // because ChildTasks may not be populated when OutlineLevel is 0.
+            if (!isSummary)
             {
                 if (mppTask.Duration != null && mppTask.Duration.Value >= 0)
                 {
@@ -708,6 +872,81 @@ namespace ADC.MppImport.Services
                     return val * 160.0;
                 default: return val;
             }
+        }
+
+        private HashSet<int> GetAllDescendants(int summaryId, Dictionary<int, List<int>> childrenOf)
+        {
+            var result = new HashSet<int>();
+            var stack = new Stack<int>();
+            List<int> children;
+            if (childrenOf.TryGetValue(summaryId, out children))
+            {
+                foreach (var c in children) stack.Push(c);
+            }
+            while (stack.Count > 0)
+            {
+                int id = stack.Pop();
+                result.Add(id);
+                if (childrenOf.TryGetValue(id, out children))
+                {
+                    foreach (var c in children) stack.Push(c);
+                }
+            }
+            return result;
+        }
+
+        private List<int> GetEntryLeaves(int summaryId, Dictionary<int, List<int>> childrenOf,
+            HashSet<int> summaryTaskIds, Dictionary<int, List<int>> predecessorMap)
+        {
+            var descendants = GetAllDescendants(summaryId, childrenOf);
+            var entries = new List<int>();
+            foreach (var id in descendants)
+            {
+                if (summaryTaskIds.Contains(id)) continue;
+                bool hasInternalPred = false;
+                List<int> preds;
+                if (predecessorMap.TryGetValue(id, out preds))
+                {
+                    foreach (var predId in preds)
+                    {
+                        if (descendants.Contains(predId)) { hasInternalPred = true; break; }
+                    }
+                }
+                if (!hasInternalPred) entries.Add(id);
+            }
+            if (entries.Count == 0)
+            {
+                foreach (var id in descendants)
+                    if (!summaryTaskIds.Contains(id)) entries.Add(id);
+            }
+            return entries;
+        }
+
+        private List<int> GetExitLeaves(int summaryId, Dictionary<int, List<int>> childrenOf,
+            HashSet<int> summaryTaskIds, Dictionary<int, List<int>> successorMap)
+        {
+            var descendants = GetAllDescendants(summaryId, childrenOf);
+            var exits = new List<int>();
+            foreach (var id in descendants)
+            {
+                if (summaryTaskIds.Contains(id)) continue;
+                bool hasInternalSucc = false;
+                List<int> succs;
+                if (successorMap.TryGetValue(id, out succs))
+                {
+                    foreach (var succId in succs)
+                    {
+                        if (descendants.Contains(succId)) { hasInternalSucc = true; break; }
+                    }
+                }
+                if (!hasInternalSucc) exits.Add(id);
+            }
+            if (exits.Count == 0)
+            {
+                foreach (var id in descendants)
+                    if (!summaryTaskIds.Contains(id)) exits.Add(id);
+            }
+            return exits;
         }
 
         #endregion

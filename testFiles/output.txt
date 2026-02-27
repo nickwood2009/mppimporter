@@ -1,0 +1,780 @@
+
+================================================================
+  SIDE-BY-SIDE COMPARISON TEST (Async Import)
+================================================================
+Found 1 MPP file(s) in: C:\Dev\industry\mppimporter\testFiles
+  - Generated_300tasks.mpp
+Connecting to Dynamics 365 (client secret)...
+  Org: po1
+  Connected successfully.
+
+================================================================
+  FILE: Generated_300tasks.mpp
+================================================================
+  [1/5] Parsing MPP locally...
+    MPP: 300 tasks (76 summary, 224 leaf), 235 deps (22 involving summary tasks)
+    Project start: 3/03/2026
+  [2/5] Creating project + running async import...
+    Project: 20bdde2d-d113-f111-8341-6045bde6e505
+  [TRACE] InitializeJob: parsing MPP (589824 bytes)...
+  [TRACE] Parsed: 301 tasks, 0 resources
+  [TRACE] Max parent chain depth: 7 (limit=10)
+  [TRACE] Summary tasks: 76, Total tasks: 300
+  [TRACE] 235 raw deps include 22 involving summary tasks - transforming to leaf deps
+  [TRACE] Transformed: 22 summary deps  41 leaf deps (total deps: 254)
+  [TRACE] Dependencies: 254
+  [TRACE] Batches: 4 (limit 100 per batch)
+  [TRACE] Payload JSON size: 81741 chars
+  [TRACE] Created job record: 2c55b136-d113-f111-8341-6045bde6e505
+  [TRACE] Notification sent to a13e4aa4-27d8-f011-8543-6045bdc38adc: MPP Import Started
+    Job: 2c55b136-d113-f111-8341-6045bde6e505
+  [3/5] Polling job status...
+    [  5s] Queued | Tasks: 0 | Deps: 0
+    [ 30s] CreatingTasks | Tasks: 0 | Deps: 0
+    [130s] PollingGUIDs | Tasks: 300 | Deps: 0
+    [195s] CreatingDeps | Tasks: 300 | Deps: 0
+    [290s] Completed | Tasks: 300 | Deps: 254
+    Waiting 30s for PSS to finalize scheduling...
+  [4/5] Querying D365 tasks and dependencies...
+    D365: 300 tasks (excl. root), 200 dependencies
+  [5/5] Comparing...
+
+    [PASS] Task count: 300
+    [PASS] All 300 task names matched to CRM
+    [WARN] Parent hierarchy: 262 OK, 38 mismatched
+    [WARN] Leaf durations: 188 OK, 36 mismatched
+
+    Dependencies: 173/235 found, 62 missing (22 summary), 27 extra in CRM
+    [WARN] 62 dependencies missing from D365:
+      MISSING (summary): Documentation - Conduct deployment plan - Conduct specifications --FS--> Schedule data model
+      MISSING (summary): Analyse specifications --FS--> Requirements
+      MISSING (summary): Validate data model --FS--> Requirements
+      MISSING (summary): Documentation - Integrate specifications --FS--> Migrate budget
+      MISSING (summary): Integrate training materials --FS--> Data Management - Monitor budget - Create rollback plan
+      MISSING (summary): Quality Assurance --FS--> Finalise deployment plan
+      MISSING (summary): Planning - Analyse quality plan - Test design documents --FS--> Integrate work breakdown structure
+      MISSING (summary): Develop resource plan --FS--> Design - Conduct interface design
+      MISSING (summary): Assess design documents --FS--> UAT - Migrate work breakdown structure
+      MISSING (summary): Schedule interface design --FS--> UAT - Conduct training materials - Document performance baseline
+      MISSING (summary): Design - Conduct interface design --FS--> Resolve specifications
+      MISSING (summary): Documentation - Analyse operations manual - Implement specifications --FS--> Create quality plan
+      MISSING (summary): Design - Implement test cases - Configure acceptance criteria --FS--> Coordinate work breakdown structure
+      MISSING (summary): Develop operations manual --FS--> Migration - Evaluate quality plan - Schedule deployment plan - Deploy performance baseline
+      MISSING (summary): Finalise design documents --FS--> Migration - Finalise user guide
+      MISSING (summary): Test architecture --FS--> Migration - Finalise user guide
+      MISSING: Deliver user guide --FS--> Analyse security policy
+      MISSING: Resolve user guide --FF--> Analyse security policy
+      MISSING (summary): Assess acceptance criteria --FS--> Training - Assess operations manual - Integrate meeting minutes - Conduct stakeholder matrix - Analyse operations manual - Finalise rollback plan
+      MISSING: Analyse security policy --FF--> Review resource plan
+      MISSING: Schedule security policy --SS--> Migrate acceptance criteria
+      MISSING: Migrate acceptance criteria --FS--> Develop change request
+      MISSING: Develop change request --SS--> Create deployment plan
+      MISSING: Create meeting minutes --FS--> Create deployment plan
+      MISSING: Create deployment plan --SS--> Deliver risk register
+      MISSING: Deliver risk register --FS--> Monitor architecture
+      MISSING: Monitor architecture --FS--> Conduct budget
+      MISSING: Conduct budget --FS--> Deliver stakeholder matrix
+      MISSING: Deliver stakeholder matrix --SS--> Conduct security policy
+      MISSING: Conduct security policy --FF--> Finalise operations manual
+      MISSING: Finalise operations manual --FS--> Analyse test cases
+      MISSING: Analyse test cases --FS--> Prepare project charter
+      MISSING: Prepare project charter --FF--> Approve communication plan
+      MISSING: Approve communication plan --SS--> Evaluate requirements
+      MISSING: Evaluate requirements --FS--> Prepare cutover plan
+      MISSING (summary): Review stakeholder matrix --FS--> Risk Assessment
+      MISSING: Prepare cutover plan --FS--> Assess work breakdown structure
+      MISSING (summary): Training - Assess operations manual - Integrate meeting minutes --FS--> Assess work breakdown structure
+      MISSING: Assess work breakdown structure --FS--> Schedule test cases
+      MISSING: Schedule test cases --FS--> Evaluate risk register
+      MISSING: Integrate design documents --FS--> Evaluate risk register
+      MISSING: Test communication plan --FS--> Document operations manual
+      MISSING: Document operations manual --FS--> Deliver data model
+      MISSING: Integrate design documents --FS--> Deliver data model
+      MISSING: Deliver data model --FS--> Create rollback plan
+      MISSING: Create rollback plan --FS--> Configure specifications
+      MISSING (summary): Training - Assess operations manual - Integrate meeting minutes --FS--> Configure specifications
+      MISSING: Configure specifications --SS--> Schedule interface design
+      MISSING: Schedule interface design --FS--> Document test cases
+      MISSING: Document test cases --FS--> Create test cases
+      MISSING: Deliver stakeholder matrix --FS--> Resolve issue log
+      MISSING: Coordinate user guide --FS--> Resolve issue log
+      MISSING: Resolve issue log --FS--> Conduct cutover plan
+      MISSING: Conduct cutover plan --SS--> Conduct rollback plan
+      MISSING: Conduct budget --FF--> Conduct rollback plan
+      MISSING (summary): Requirements --FS--> Conduct rollback plan
+      MISSING: Conduct rollback plan --FS--> Develop test cases
+      MISSING: Develop test cases --FS--> Deploy issue log
+      MISSING (summary): Training --FS--> Deploy issue log
+      MISSING: Deploy issue log --SS--> Conduct work breakdown structure
+      MISSING: Conduct work breakdown structure --FS--> Conduct quality plan
+      MISSING: Conduct quality plan --FF--> Analyse training materials
+
+    --- Dependency Issues ---
+      MISSING (summary): Documentation - Conduct deployment plan - Conduct specifications --FS--> Schedule data model
+      MISSING (summary): Analyse specifications --FS--> Requirements
+      MISSING (summary): Validate data model --FS--> Requirements
+      MISSING (summary): Documentation - Integrate specifications --FS--> Migrate budget
+      MISSING (summary): Integrate training materials --FS--> Data Management - Monitor budget - Create rollback plan
+      MISSING (summary): Quality Assurance --FS--> Finalise deployment plan
+      MISSING (summary): Planning - Analyse quality plan - Test design documents --FS--> Integrate work breakdown structure
+      MISSING (summary): Develop resource plan --FS--> Design - Conduct interface design
+      MISSING (summary): Assess design documents --FS--> UAT - Migrate work breakdown structure
+      MISSING (summary): Schedule interface design --FS--> UAT - Conduct training materials - Document performance baseline
+      MISSING (summary): Design - Conduct interface design --FS--> Resolve specifications
+      MISSING (summary): Documentation - Analyse operations manual - Implement specifications --FS--> Create quality plan
+      MISSING (summary): Design - Implement test cases - Configure acceptance criteria --FS--> Coordinate work breakdown structure
+      MISSING (summary): Develop operations manual --FS--> Migration - Evaluate quality plan - Schedule deployment plan - Deploy performance baseline
+      MISSING (summary): Finalise design documents --FS--> Migration - Finalise user guide
+      MISSING (summary): Test architecture --FS--> Migration - Finalise user guide
+      MISSING: Deliver user guide --FS--> Analyse security policy
+      MISSING: Resolve user guide --FF--> Analyse security policy
+      MISSING (summary): Assess acceptance criteria --FS--> Training - Assess operations manual - Integrate meeting minutes - Conduct stakeholder matrix - Analyse operations manual - Finalise rollback plan
+      MISSING: Analyse security policy --FF--> Review resource plan
+      MISSING: Schedule security policy --SS--> Migrate acceptance criteria
+      MISSING: Migrate acceptance criteria --FS--> Develop change request
+      MISSING: Develop change request --SS--> Create deployment plan
+      MISSING: Create meeting minutes --FS--> Create deployment plan
+      MISSING: Create deployment plan --SS--> Deliver risk register
+      MISSING: Deliver risk register --FS--> Monitor architecture
+      MISSING: Monitor architecture --FS--> Conduct budget
+      MISSING: Conduct budget --FS--> Deliver stakeholder matrix
+      MISSING: Deliver stakeholder matrix --SS--> Conduct security policy
+      MISSING: Conduct security policy --FF--> Finalise operations manual
+      MISSING: Finalise operations manual --FS--> Analyse test cases
+      MISSING: Analyse test cases --FS--> Prepare project charter
+      MISSING: Prepare project charter --FF--> Approve communication plan
+      MISSING: Approve communication plan --SS--> Evaluate requirements
+      MISSING: Evaluate requirements --FS--> Prepare cutover plan
+      MISSING (summary): Review stakeholder matrix --FS--> Risk Assessment
+      MISSING: Prepare cutover plan --FS--> Assess work breakdown structure
+      MISSING (summary): Training - Assess operations manual - Integrate meeting minutes --FS--> Assess work breakdown structure
+      MISSING: Assess work breakdown structure --FS--> Schedule test cases
+      MISSING: Schedule test cases --FS--> Evaluate risk register
+      MISSING: Integrate design documents --FS--> Evaluate risk register
+      MISSING: Test communication plan --FS--> Document operations manual
+      MISSING: Document operations manual --FS--> Deliver data model
+      MISSING: Integrate design documents --FS--> Deliver data model
+      MISSING: Deliver data model --FS--> Create rollback plan
+      MISSING: Create rollback plan --FS--> Configure specifications
+      MISSING (summary): Training - Assess operations manual - Integrate meeting minutes --FS--> Configure specifications
+      MISSING: Configure specifications --SS--> Schedule interface design
+      MISSING: Schedule interface design --FS--> Document test cases
+      MISSING: Document test cases --FS--> Create test cases
+      MISSING: Deliver stakeholder matrix --FS--> Resolve issue log
+      MISSING: Coordinate user guide --FS--> Resolve issue log
+      MISSING: Resolve issue log --FS--> Conduct cutover plan
+      MISSING: Conduct cutover plan --SS--> Conduct rollback plan
+      MISSING: Conduct budget --FF--> Conduct rollback plan
+      MISSING (summary): Requirements --FS--> Conduct rollback plan
+      MISSING: Conduct rollback plan --FS--> Develop test cases
+      MISSING: Develop test cases --FS--> Deploy issue log
+      MISSING (summary): Training --FS--> Deploy issue log
+      MISSING: Deploy issue log --SS--> Conduct work breakdown structure
+      MISSING: Conduct work breakdown structure --FS--> Conduct quality plan
+      MISSING: Conduct quality plan --FF--> Analyse training materials
+
+  CHECK 6: Calendar-aware date comparison
+    MPP Calendar:  "(unnamed)"  Working: Mon, Tue, Wed, Thu, Fri  Exceptions: 0
+      Sun: default (non-working)
+      Mon: default (working)
+      Tue: default (working)
+      Wed: default (working)
+      Thu: default (working)
+      Fri: default (working)
+      Sat: default (non-working)
+    D365 Calendar: "(error: 'msdyn_project' entity doesn't contain attribute with Name = 'calendarid' and NameMapping = 'Logical' (look up attribute by name is case-sensitive).orgIndex: 46, id: bd9b44ba-7e82-4b3b-a9ae-6067bdc0afa2, logicalName: msdyn_project)"  Working: Mon, Tue, Wed, Thu, Fri
+    Calendars match: YES
+    MPP project start:  2026-03-03 (Tuesday)
+    D365 earliest task: 2026-02-27 (Friday)
+    Start dates: 82 match, 218 differ (±1d tolerance)
+    End dates:   53 match, 247 differ (±1d tolerance)
+    [WARN] 465 dates not fully explained by calendars:
+      END   [S] Documentation: MPP=2026-05-28, D365=2026-10-05, expected=2026-05-26 (mppWD=62, dev=132d)
+      START [S] Documentation - Conduct deployment plan: MPP=2026-03-03, D365=2026-03-09, expected=2026-02-27 (mppWD=0, dev=10d)
+      END   [S] Documentation - Conduct deployment plan: MPP=2026-05-14, D365=2026-10-05, expected=2026-05-12 (mppWD=52, dev=146d)
+      END   Analyse test plan: MPP=2026-03-03, D365=2026-03-26, expected=2026-02-27 (mppWD=0, dev=27d)
+      START Schedule requirements: MPP=2026-03-03, D365=2026-03-27, expected=2026-02-27 (mppWD=0, dev=28d)
+      END   Schedule requirements: MPP=2026-03-03, D365=2026-04-07, expected=2026-02-27 (mppWD=0, dev=39d)
+      START Approve test cases: MPP=2026-03-03, D365=2026-04-07, expected=2026-02-27 (mppWD=0, dev=39d)
+      END   Approve test cases: MPP=2026-03-03, D365=2026-04-07, expected=2026-02-27 (mppWD=0, dev=39d)
+      START Migrate design documents: MPP=2026-03-03, D365=2026-04-08, expected=2026-02-27 (mppWD=0, dev=40d)
+      END   Migrate design documents: MPP=2026-03-24, D365=2026-05-01, expected=2026-03-20 (mppWD=15, dev=42d)
+      END   [S] Documentation - Conduct deployment plan - Conduct specifications: MPP=2026-05-14, D365=2026-06-26, expected=2026-05-12 (mppWD=52, dev=45d)
+      START Analyse specifications: MPP=2026-03-25, D365=2026-05-04, expected=2026-03-23 (mppWD=16, dev=42d)
+      END   Analyse specifications: MPP=2026-04-14, D365=2026-05-22, expected=2026-04-10 (mppWD=30, dev=42d)
+      START Create requirements: MPP=2026-04-15, D365=2026-05-25, expected=2026-04-13 (mppWD=31, dev=42d)
+      END   Create requirements: MPP=2026-04-22, D365=2026-05-27, expected=2026-04-20 (mppWD=36, dev=37d)
+      START Review data model: MPP=2026-04-15, D365=2026-05-28, expected=2026-04-13 (mppWD=31, dev=45d)
+      END   Review data model: MPP=2026-04-28, D365=2026-06-10, expected=2026-04-24 (mppWD=40, dev=47d)
+      START Prepare compliance checklist: MPP=2026-04-29, D365=2026-06-11, expected=2026-04-27 (mppWD=41, dev=45d)
+      END   Prepare compliance checklist: MPP=2026-05-13, D365=2026-06-25, expected=2026-05-11 (mppWD=51, dev=45d)
+      START Analyse requirements: MPP=2026-05-14, D365=2026-06-26, expected=2026-05-12 (mppWD=52, dev=45d)
+      END   Analyse requirements: MPP=2026-05-14, D365=2026-06-26, expected=2026-05-12 (mppWD=52, dev=45d)
+      START [S] Documentation - Integrate specifications: MPP=2026-05-14, D365=2026-06-29, expected=2026-05-12 (mppWD=52, dev=48d)
+      END   [S] Documentation - Integrate specifications: MPP=2026-05-28, D365=2026-07-13, expected=2026-05-26 (mppWD=62, dev=48d)
+      START Resolve rollback plan: MPP=2026-05-14, D365=2026-06-29, expected=2026-05-12 (mppWD=52, dev=48d)
+      END   Resolve rollback plan: MPP=2026-05-23, D365=2026-07-08, expected=2026-05-21 (mppWD=59, dev=48d)
+      START Migrate specifications: MPP=2026-05-26, D365=2026-07-09, expected=2026-05-22 (mppWD=60, dev=48d)
+      END   Migrate specifications: MPP=2026-05-28, D365=2026-07-13, expected=2026-05-26 (mppWD=62, dev=48d)
+      START Integrate data model: MPP=2026-03-03, D365=2026-03-04, expected=2026-02-27 (mppWD=0, dev=5d)
+      END   Integrate data model: MPP=2026-03-18, D365=2026-03-19, expected=2026-03-16 (mppWD=11, dev=3d)
+      END   [S] Quality Assurance: MPP=2026-07-25, D365=2027-05-20, expected=2026-07-23 (mppWD=104, dev=301d)
+      ... and 435 more
+
+    --- Warnings ---
+      Parent mismatch 'Analyse test plan': expected parent='Documentation - Conduct deployment plan', got 'Data Management - Monitor budget'
+      Parent mismatch 'Schedule requirements': expected parent='Documentation - Conduct deployment plan', got 'Migration - Deploy test cases'
+      Parent mismatch 'Migrate design documents': expected parent='Documentation - Conduct deployment plan', got 'Data Management - Monitor budget - Create rollback plan'
+      Parent mismatch 'Create requirements': expected parent='Documentation - Conduct deployment plan - Conduct specifications', got 'Migration - Evaluate quality plan'
+      Parent mismatch 'Schedule test cases': expected parent='Quality Assurance', got 'Risk Assessment - Finalise test cases'
+      Parent mismatch 'Finalise scope statement': expected parent='Quality Assurance - Evaluate communication plan', got 'Migration - Finalise user guide - Approve design documents'
+      Parent mismatch 'Validate user guide': expected parent='Quality Assurance - Document quality plan - Deploy requirements - Evaluate requirements', got 'Planning - Implement milestone report'
+      Parent mismatch 'Document operations manual': expected parent='Quality Assurance - Finalise training materials - Integrate acceptance criteria', got 'Risk Assessment - Finalise test cases'
+      Parent mismatch 'Document work breakdown structure': expected parent='Quality Assurance - Finalise training materials - Integrate acceptance criteria - Assess test plan', got 'Migration - Evaluate quality plan'
+      Parent mismatch 'Create rollback plan': expected parent='Requirements - Migrate rollback plan - Integrate requirements', got 'Risk Assessment - Finalise test cases - Schedule security policy - Deploy resource plan'
+      Parent mismatch 'Develop status report': expected parent='Requirements - Migrate rollback plan - Review requirements', got 'Migration - Finalise user guide - Approve design documents'
+      Parent mismatch 'Deliver data model': expected parent='Planning - Evaluate design documents - Approve issue log', got 'Risk Assessment - Finalise test cases - Schedule security policy'
+      Parent mismatch 'Validate user guide': expected parent='Planning - Implement milestone report', got 'Quality Assurance - Document quality plan - Deploy requirements - Evaluate requirements'
+      Parent mismatch 'Resolve issue log': expected parent='Data Management', got 'Risk Assessment - Deliver communication plan'
+      Parent mismatch 'Prepare cutover plan': expected parent='Data Management', got 'Training'
+      Parent mismatch 'Create meeting minutes': expected parent='Data Management - Monitor budget', got 'Migration - Finalise user guide - Approve design documents'
+      Parent mismatch 'Migrate design documents': expected parent='Data Management - Monitor budget - Create rollback plan', got 'Documentation - Conduct deployment plan'
+      Parent mismatch 'Analyse test plan': expected parent='Data Management - Monitor budget', got 'Documentation - Conduct deployment plan'
+      Parent mismatch 'Schedule security policy': expected parent='Data Management', got 'Training - Assess operations manual - Integrate meeting minutes - Conduct stakeholder matrix - Analyse operations manual - Finalise rollback plan'
+      Parent mismatch 'Integrate interface design': expected parent='Design - Conduct interface design', got 'Migration - Finalise user guide - Approve design documents'
+      Parent mismatch 'Approve communication plan': expected parent='UAT - Migrate work breakdown structure', got 'Training - Create cutover plan'
+      Parent mismatch 'Conduct security policy': expected parent='Migration - Analyse quality plan', got 'Training - Integrate test plan - Review design documents'
+      Parent mismatch 'Schedule requirements': expected parent='Migration - Deploy test cases', got 'Documentation - Conduct deployment plan'
+      Parent mismatch 'Document work breakdown structure': expected parent='Migration - Evaluate quality plan', got 'Quality Assurance - Finalise training materials - Integrate acceptance criteria - Assess test plan'
+      Parent mismatch 'Create requirements': expected parent='Migration - Evaluate quality plan', got 'Documentation - Conduct deployment plan - Conduct specifications'
+      Parent mismatch 'Create meeting minutes': expected parent='Migration - Finalise user guide - Approve design documents', got 'Data Management - Monitor budget'
+      Parent mismatch 'Develop status report': expected parent='Migration - Finalise user guide - Approve design documents', got 'Requirements - Migrate rollback plan - Review requirements'
+      Parent mismatch 'Integrate interface design': expected parent='Migration - Finalise user guide - Approve design documents', got 'Design - Conduct interface design'
+      Parent mismatch 'Finalise scope statement': expected parent='Migration - Finalise user guide - Approve design documents', got 'Quality Assurance - Evaluate communication plan'
+      Parent mismatch 'Schedule security policy': expected parent='Training - Assess operations manual - Integrate meeting minutes - Conduct stakeholder matrix - Analyse operations manual - Finalise rollback plan', got 'Data Management'
+      Parent mismatch 'Conduct security policy': expected parent='Training - Integrate test plan - Review design documents', got 'Migration - Analyse quality plan'
+      Parent mismatch 'Approve communication plan': expected parent='Training - Create cutover plan', got 'UAT - Migrate work breakdown structure'
+      Parent mismatch 'Prepare cutover plan': expected parent='Training', got 'Data Management'
+      Parent mismatch 'Schedule test cases': expected parent='Risk Assessment - Finalise test cases', got 'Quality Assurance'
+      Parent mismatch 'Document operations manual': expected parent='Risk Assessment - Finalise test cases', got 'Quality Assurance - Finalise training materials - Integrate acceptance criteria'
+      Parent mismatch 'Deliver data model': expected parent='Risk Assessment - Finalise test cases - Schedule security policy', got 'Planning - Evaluate design documents - Approve issue log'
+      Parent mismatch 'Create rollback plan': expected parent='Risk Assessment - Finalise test cases - Schedule security policy - Deploy resource plan', got 'Requirements - Migrate rollback plan - Integrate requirements'
+      Parent mismatch 'Resolve issue log': expected parent='Risk Assessment - Deliver communication plan', got 'Data Management'
+      Duration mismatch 'Analyse test plan': expected 0.0d, got 20.0d
+      Duration mismatch 'Schedule requirements': expected 0.0d, got 8.0d
+      Duration mismatch 'Migrate design documents': expected 16.0d, got 18.0d
+      Duration mismatch 'Create requirements': expected 6.0d, got 3.0d
+      Duration mismatch 'Schedule test cases': expected 1.0d, got 20.0d
+      Duration mismatch 'Finalise scope statement': expected 13.0d, got 5.0d
+      Duration mismatch 'Document operations manual': expected 18.0d, got 17.0d
+      Duration mismatch 'Document work breakdown structure': expected 15.0d, got 4.0d
+      Duration mismatch 'Create rollback plan': expected 17.0d, got 20.0d
+      Duration mismatch 'Develop status report': expected 0.0d, got 13.0d
+      Duration mismatch 'Deliver data model': expected 20.0d, got 15.0d
+      Duration mismatch 'Resolve issue log': expected 10.0d, got 2.0d
+      Duration mismatch 'Prepare cutover plan': expected 12.0d, got 4.0d
+      Duration mismatch 'Create meeting minutes': expected 4.0d, got 0.0d
+      Duration mismatch 'Migrate design documents': expected 18.0d, got 16.0d
+      Duration mismatch 'Analyse test plan': expected 20.0d, got 0.0d
+      Duration mismatch 'Schedule security policy': expected 14.0d, got 0.0d
+      Duration mismatch 'Integrate interface design': expected 17.0d, got 0.0d
+      Duration mismatch 'Approve communication plan': expected 2.0d, got 3.0d
+      Duration mismatch 'Conduct security policy': expected 5.0d, got 18.0d
+      Duration mismatch 'Schedule requirements': expected 8.0d, got 0.0d
+      Duration mismatch 'Document work breakdown structure': expected 4.0d, got 15.0d
+      Duration mismatch 'Create requirements': expected 3.0d, got 6.0d
+      Duration mismatch 'Create meeting minutes': expected 0.0d, got 4.0d
+      Duration mismatch 'Develop status report': expected 13.0d, got 0.0d
+      Duration mismatch 'Integrate interface design': expected 0.0d, got 17.0d
+      Duration mismatch 'Finalise scope statement': expected 5.0d, got 13.0d
+      Duration mismatch 'Schedule security policy': expected 0.0d, got 14.0d
+      Duration mismatch 'Conduct security policy': expected 18.0d, got 5.0d
+      Duration mismatch 'Approve communication plan': expected 3.0d, got 2.0d
+      Duration mismatch 'Prepare cutover plan': expected 4.0d, got 12.0d
+      Duration mismatch 'Schedule test cases': expected 20.0d, got 1.0d
+      Duration mismatch 'Document operations manual': expected 17.0d, got 18.0d
+      Duration mismatch 'Deliver data model': expected 15.0d, got 20.0d
+      Duration mismatch 'Create rollback plan': expected 20.0d, got 17.0d
+      Duration mismatch 'Resolve issue log': expected 2.0d, got 10.0d
+      END   [S] Documentation: MPP=2026-05-28, D365=2026-10-05, expected=2026-05-26 (mppWD=62, dev=132d)
+      START [S] Documentation - Conduct deployment plan: MPP=2026-03-03, D365=2026-03-09, expected=2026-02-27 (mppWD=0, dev=10d)
+      END   [S] Documentation - Conduct deployment plan: MPP=2026-05-14, D365=2026-10-05, expected=2026-05-12 (mppWD=52, dev=146d)
+      END   Analyse test plan: MPP=2026-03-03, D365=2026-03-26, expected=2026-02-27 (mppWD=0, dev=27d)
+      START Schedule requirements: MPP=2026-03-03, D365=2026-03-27, expected=2026-02-27 (mppWD=0, dev=28d)
+      END   Schedule requirements: MPP=2026-03-03, D365=2026-04-07, expected=2026-02-27 (mppWD=0, dev=39d)
+      START Approve test cases: MPP=2026-03-03, D365=2026-04-07, expected=2026-02-27 (mppWD=0, dev=39d)
+      END   Approve test cases: MPP=2026-03-03, D365=2026-04-07, expected=2026-02-27 (mppWD=0, dev=39d)
+      START Migrate design documents: MPP=2026-03-03, D365=2026-04-08, expected=2026-02-27 (mppWD=0, dev=40d)
+      END   Migrate design documents: MPP=2026-03-24, D365=2026-05-01, expected=2026-03-20 (mppWD=15, dev=42d)
+      END   [S] Documentation - Conduct deployment plan - Conduct specifications: MPP=2026-05-14, D365=2026-06-26, expected=2026-05-12 (mppWD=52, dev=45d)
+      START Analyse specifications: MPP=2026-03-25, D365=2026-05-04, expected=2026-03-23 (mppWD=16, dev=42d)
+      END   Analyse specifications: MPP=2026-04-14, D365=2026-05-22, expected=2026-04-10 (mppWD=30, dev=42d)
+      START Create requirements: MPP=2026-04-15, D365=2026-05-25, expected=2026-04-13 (mppWD=31, dev=42d)
+      END   Create requirements: MPP=2026-04-22, D365=2026-05-27, expected=2026-04-20 (mppWD=36, dev=37d)
+      START Review data model: MPP=2026-04-15, D365=2026-05-28, expected=2026-04-13 (mppWD=31, dev=45d)
+      END   Review data model: MPP=2026-04-28, D365=2026-06-10, expected=2026-04-24 (mppWD=40, dev=47d)
+      START Prepare compliance checklist: MPP=2026-04-29, D365=2026-06-11, expected=2026-04-27 (mppWD=41, dev=45d)
+      END   Prepare compliance checklist: MPP=2026-05-13, D365=2026-06-25, expected=2026-05-11 (mppWD=51, dev=45d)
+      START Analyse requirements: MPP=2026-05-14, D365=2026-06-26, expected=2026-05-12 (mppWD=52, dev=45d)
+      END   Analyse requirements: MPP=2026-05-14, D365=2026-06-26, expected=2026-05-12 (mppWD=52, dev=45d)
+      START [S] Documentation - Integrate specifications: MPP=2026-05-14, D365=2026-06-29, expected=2026-05-12 (mppWD=52, dev=48d)
+      END   [S] Documentation - Integrate specifications: MPP=2026-05-28, D365=2026-07-13, expected=2026-05-26 (mppWD=62, dev=48d)
+      START Resolve rollback plan: MPP=2026-05-14, D365=2026-06-29, expected=2026-05-12 (mppWD=52, dev=48d)
+      END   Resolve rollback plan: MPP=2026-05-23, D365=2026-07-08, expected=2026-05-21 (mppWD=59, dev=48d)
+      START Migrate specifications: MPP=2026-05-26, D365=2026-07-09, expected=2026-05-22 (mppWD=60, dev=48d)
+      END   Migrate specifications: MPP=2026-05-28, D365=2026-07-13, expected=2026-05-26 (mppWD=62, dev=48d)
+      START Integrate data model: MPP=2026-03-03, D365=2026-03-04, expected=2026-02-27 (mppWD=0, dev=5d)
+      END   Integrate data model: MPP=2026-03-18, D365=2026-03-19, expected=2026-03-16 (mppWD=11, dev=3d)
+      END   [S] Quality Assurance: MPP=2026-07-25, D365=2027-05-20, expected=2026-07-23 (mppWD=104, dev=301d)
+      END   Schedule test cases: MPP=2026-03-18, D365=2026-04-10, expected=2026-03-16 (mppWD=11, dev=25d)
+      END   [S] Quality Assurance - Evaluate communication plan: MPP=2026-07-25, D365=2027-05-20, expected=2026-07-23 (mppWD=104, dev=301d)
+      START Assess design documents: MPP=2026-03-19, D365=2026-04-13, expected=2026-03-17 (mppWD=12, dev=27d)
+      END   Assess design documents: MPP=2026-04-15, D365=2026-05-08, expected=2026-04-13 (mppWD=31, dev=25d)
+      START Finalise scope statement: MPP=2026-04-16, D365=2026-05-11, expected=2026-04-14 (mppWD=32, dev=27d)
+      END   Finalise scope statement: MPP=2026-05-02, D365=2026-05-15, expected=2026-04-30 (mppWD=44, dev=15d)
+      START Schedule interface design: MPP=2026-04-24, D365=2026-05-18, expected=2026-04-22 (mppWD=38, dev=26d)
+      END   Schedule interface design: MPP=2026-05-02, D365=2026-05-26, expected=2026-04-30 (mppWD=44, dev=26d)
+      START Schedule stakeholder matrix: MPP=2026-04-24, D365=2026-05-27, expected=2026-04-22 (mppWD=38, dev=35d)
+      END   Schedule stakeholder matrix: MPP=2026-05-13, D365=2026-06-15, expected=2026-05-11 (mppWD=51, dev=35d)
+      START [S] Quality Assurance - Evaluate communication plan - Create performance baseline: MPP=2026-05-14, D365=2026-06-16, expected=2026-05-12 (mppWD=52, dev=35d)
+      END   [S] Quality Assurance - Evaluate communication plan - Create performance baseline: MPP=2026-07-09, D365=2026-09-04, expected=2026-07-07 (mppWD=92, dev=59d)
+      START Develop resource plan: MPP=2026-05-14, D365=2026-06-16, expected=2026-05-12 (mppWD=52, dev=35d)
+      END   Develop resource plan: MPP=2026-06-06, D365=2026-07-09, expected=2026-06-04 (mppWD=69, dev=35d)
+      START Update cutover plan: MPP=2026-06-09, D365=2026-07-10, expected=2026-06-05 (mppWD=70, dev=35d)
+      END   Update cutover plan: MPP=2026-07-02, D365=2026-08-04, expected=2026-06-30 (mppWD=87, dev=35d)
+      START Deliver test cases: MPP=2026-06-09, D365=2026-08-05, expected=2026-06-05 (mppWD=70, dev=61d)
+      END   Deliver test cases: MPP=2026-06-13, D365=2026-08-11, expected=2026-06-11 (mppWD=74, dev=61d)
+      START Migrate status report: MPP=2026-06-16, D365=2026-08-12, expected=2026-06-12 (mppWD=75, dev=61d)
+      END   Migrate status report: MPP=2026-06-18, D365=2026-08-14, expected=2026-06-16 (mppWD=77, dev=59d)
+      START Schedule quality plan: MPP=2026-06-19, D365=2026-08-17, expected=2026-06-17 (mppWD=78, dev=61d)
+      END   Schedule quality plan: MPP=2026-07-09, D365=2026-09-04, expected=2026-07-07 (mppWD=92, dev=59d)
+      START Create status report: MPP=2026-07-10, D365=2026-09-07, expected=2026-07-08 (mppWD=93, dev=61d)
+      END   Create status report: MPP=2026-07-25, D365=2026-09-22, expected=2026-07-23 (mppWD=104, dev=61d)
+      END   [S] Quality Assurance - Document quality plan: MPP=2026-04-21, D365=2026-05-05, expected=2026-04-17 (mppWD=35, dev=18d)
+      START Approve cutover plan: MPP=2026-03-13, D365=2026-03-27, expected=2026-03-11 (mppWD=8, dev=16d)
+      END   Approve cutover plan: MPP=2026-03-26, D365=2026-04-09, expected=2026-03-24 (mppWD=17, dev=16d)
+      START Configure rollback plan: MPP=2026-03-27, D365=2026-04-10, expected=2026-03-25 (mppWD=18, dev=16d)
+      END   Configure rollback plan: MPP=2026-04-21, D365=2026-05-05, expected=2026-04-17 (mppWD=35, dev=18d)
+      START Integrate design documents: MPP=2026-03-03, D365=2026-03-17, expected=2026-02-27 (mppWD=0, dev=18d)
+      END   Integrate design documents: MPP=2026-03-25, D365=2026-04-08, expected=2026-03-23 (mppWD=16, dev=16d)
+      START Configure operations manual: MPP=2026-03-03, D365=2026-04-09, expected=2026-02-27 (mppWD=0, dev=41d)
+      END   Configure operations manual: MPP=2026-03-03, D365=2026-04-09, expected=2026-02-27 (mppWD=0, dev=41d)
+      START Validate test cases: MPP=2026-03-04, D365=2026-04-10, expected=2026-03-02 (mppWD=1, dev=39d)
+      END   Validate test cases: MPP=2026-03-20, D365=2026-04-28, expected=2026-03-18 (mppWD=13, dev=41d)
+      END   [S] Quality Assurance - Finalise training materials: MPP=2026-07-16, D365=2026-09-21, expected=2026-07-14 (mppWD=97, dev=69d)
+      END   [S] Quality Assurance - Finalise training materials - Integrate acceptance criteria: MPP=2026-07-01, D365=2026-08-18, expected=2026-06-29 (mppWD=86, dev=50d)
+      START Migrate resource plan: MPP=2026-03-21, D365=2026-04-29, expected=2026-03-19 (mppWD=14, dev=41d)
+      END   Migrate resource plan: MPP=2026-03-26, D365=2026-05-04, expected=2026-03-24 (mppWD=17, dev=41d)
+      START Test change request: MPP=2026-03-27, D365=2026-05-05, expected=2026-03-25 (mppWD=18, dev=41d)
+      END   Test change request: MPP=2026-04-08, D365=2026-05-15, expected=2026-04-06 (mppWD=26, dev=39d)
+      START Schedule data model: MPP=2026-05-14, D365=2026-06-26, expected=2026-05-12 (mppWD=52, dev=45d)
+      END   Schedule data model: MPP=2026-05-14, D365=2026-06-26, expected=2026-05-12 (mppWD=52, dev=45d)
+      START Document operations manual: MPP=2026-05-15, D365=2026-06-29, expected=2026-05-13 (mppWD=53, dev=47d)
+      END   Document operations manual: MPP=2026-06-09, D365=2026-07-21, expected=2026-06-05 (mppWD=70, dev=46d)
+      START [S] Quality Assurance - Finalise training materials - Integrate acceptance criteria - Assess test plan: MPP=2026-06-09, D365=2026-04-01, expected=2026-06-05 (mppWD=70, dev=-65d)
+      END   [S] Quality Assurance - Finalise training materials - Integrate acceptance criteria - Assess test plan: MPP=2026-07-01, D365=2026-08-18, expected=2026-06-29 (mppWD=86, dev=50d)
+      START Deploy resource plan: MPP=2026-06-09, D365=2026-07-21, expected=2026-06-05 (mppWD=70, dev=46d)
+      END   Deploy resource plan: MPP=2026-06-09, D365=2026-07-21, expected=2026-06-05 (mppWD=70, dev=46d)
+      START Document work breakdown structure: MPP=2026-06-10, D365=2026-07-22, expected=2026-06-08 (mppWD=71, dev=44d)
+      END   Document work breakdown structure: MPP=2026-06-30, D365=2026-07-27, expected=2026-06-26 (mppWD=85, dev=31d)
+      START Assess design documents: MPP=2026-06-10, D365=2026-07-28, expected=2026-06-08 (mppWD=71, dev=50d)
+      END   Assess design documents: MPP=2026-07-01, D365=2026-08-18, expected=2026-06-29 (mppWD=86, dev=50d)
+      START Document rollback plan: MPP=2026-07-02, D365=2026-08-19, expected=2026-06-30 (mppWD=87, dev=50d)
+      END   Document rollback plan: MPP=2026-07-16, D365=2026-09-02, expected=2026-07-14 (mppWD=97, dev=50d)
+      START Create cutover plan: MPP=2026-06-30, D365=2026-09-03, expected=2026-06-26 (mppWD=85, dev=69d)
+      END   Create cutover plan: MPP=2026-07-16, D365=2026-09-21, expected=2026-07-14 (mppWD=97, dev=69d)
+      START [S] Requirements: MPP=2026-04-14, D365=2026-02-27, expected=2026-04-10 (mppWD=30, dev=-42d)
+      END   [S] Requirements: MPP=2026-09-18, D365=2027-05-28, expected=2026-09-16 (mppWD=143, dev=254d)
+      START [S] Requirements - Migrate rollback plan: MPP=2026-04-14, D365=2026-02-27, expected=2026-04-10 (mppWD=30, dev=-42d)
+      END   [S] Requirements - Migrate rollback plan: MPP=2026-08-21, D365=2027-05-28, expected=2026-08-19 (mppWD=123, dev=282d)
+      START Conduct communication plan: MPP=2026-04-15, D365=2026-05-25, expected=2026-04-13 (mppWD=31, dev=42d)
+      END   Conduct communication plan: MPP=2026-04-24, D365=2026-06-03, expected=2026-04-22 (mppWD=38, dev=42d)
+      START [S] Requirements - Migrate rollback plan - Integrate requirements: MPP=2026-04-14, D365=2026-02-27, expected=2026-04-10 (mppWD=30, dev=-42d)
+      END   [S] Requirements - Migrate rollback plan - Integrate requirements: MPP=2026-05-19, D365=2026-05-22, expected=2026-05-15 (mppWD=55, dev=7d)
+      START Create rollback plan: MPP=2026-04-25, D365=2026-06-04, expected=2026-04-23 (mppWD=39, dev=42d)
+      END   Create rollback plan: MPP=2026-05-19, D365=2026-07-01, expected=2026-05-15 (mppWD=55, dev=47d)
+      START Approve meeting minutes: MPP=2026-04-14, D365=2026-05-22, expected=2026-04-10 (mppWD=30, dev=42d)
+      END   Approve meeting minutes: MPP=2026-04-14, D365=2026-05-22, expected=2026-04-10 (mppWD=30, dev=42d)
+      START [S] Requirements - Migrate rollback plan - Review requirements: MPP=2026-04-14, D365=2026-06-11, expected=2026-04-10 (mppWD=30, dev=62d)
+      END   [S] Requirements - Migrate rollback plan - Review requirements: MPP=2026-08-21, D365=2027-05-28, expected=2026-08-19 (mppWD=123, dev=282d)
+      START Develop status report: MPP=2026-04-14, D365=2026-05-25, expected=2026-04-10 (mppWD=30, dev=45d)
+      END   Develop status report: MPP=2026-04-14, D365=2026-06-10, expected=2026-04-10 (mppWD=30, dev=61d)
+      START Resolve user guide: MPP=2026-04-15, D365=2026-06-11, expected=2026-04-13 (mppWD=31, dev=59d)
+      END   Resolve user guide: MPP=2026-04-24, D365=2026-06-22, expected=2026-04-22 (mppWD=38, dev=61d)
+      START Monitor compliance checklist: MPP=2026-04-25, D365=2026-06-23, expected=2026-04-23 (mppWD=39, dev=61d)
+      END   Monitor compliance checklist: MPP=2026-05-21, D365=2026-07-17, expected=2026-05-19 (mppWD=57, dev=59d)
+      START Integrate architecture: MPP=2026-05-22, D365=2026-07-20, expected=2026-05-20 (mppWD=58, dev=61d)
+      END   Integrate architecture: MPP=2026-06-17, D365=2026-08-13, expected=2026-06-15 (mppWD=76, dev=59d)
+      START Monitor test plan: MPP=2026-06-18, D365=2026-08-14, expected=2026-06-16 (mppWD=77, dev=59d)
+      END   Monitor test plan: MPP=2026-07-15, D365=2026-09-10, expected=2026-07-13 (mppWD=96, dev=59d)
+      START Schedule performance baseline: MPP=2026-07-16, D365=2026-09-11, expected=2026-07-14 (mppWD=97, dev=59d)
+      END   Schedule performance baseline: MPP=2026-08-11, D365=2026-10-07, expected=2026-08-07 (mppWD=115, dev=61d)
+      START Finalise project charter: MPP=2026-08-12, D365=2026-10-08, expected=2026-08-10 (mppWD=116, dev=59d)
+      END   Finalise project charter: MPP=2026-08-21, D365=2026-10-19, expected=2026-08-19 (mppWD=123, dev=61d)
+      START Deploy rollback plan: MPP=2026-08-22, D365=2026-10-20, expected=2026-08-20 (mppWD=124, dev=61d)
+      END   Deploy rollback plan: MPP=2026-08-25, D365=2026-10-21, expected=2026-08-21 (mppWD=125, dev=61d)
+      START Monitor quality plan: MPP=2026-08-26, D365=2026-10-22, expected=2026-08-24 (mppWD=126, dev=59d)
+      END   Monitor quality plan: MPP=2026-09-04, D365=2026-11-02, expected=2026-09-02 (mppWD=133, dev=61d)
+      START Develop operations manual: MPP=2026-08-26, D365=2026-11-03, expected=2026-08-24 (mppWD=126, dev=71d)
+      END   Develop operations manual: MPP=2026-09-18, D365=2026-11-26, expected=2026-09-16 (mppWD=143, dev=71d)
+      END   [S] Planning: MPP=2026-12-15, D365=2027-03-11, expected=2026-12-11 (mppWD=205, dev=90d)
+      START Prepare change request: MPP=2026-09-19, D365=2026-11-27, expected=2026-09-17 (mppWD=144, dev=71d)
+      END   Prepare change request: MPP=2026-09-29, D365=2026-12-07, expected=2026-09-25 (mppWD=150, dev=73d)
+      START [S] Planning - Evaluate design documents: MPP=2026-09-30, D365=2026-02-27, expected=2026-09-28 (mppWD=151, dev=-213d)
+      END   [S] Planning - Evaluate design documents: MPP=2026-10-28, D365=2027-01-22, expected=2026-10-26 (mppWD=171, dev=88d)
+      START [S] Planning - Evaluate design documents - Approve issue log: MPP=2026-09-30, D365=2026-02-27, expected=2026-09-28 (mppWD=151, dev=-213d)
+      END   [S] Planning - Evaluate design documents - Approve issue log: MPP=2026-10-28, D365=2027-01-22, expected=2026-10-26 (mppWD=171, dev=88d)
+      START Deliver data model: MPP=2026-09-30, D365=2026-12-08, expected=2026-09-28 (mppWD=151, dev=71d)
+      END   Deliver data model: MPP=2026-10-27, D365=2026-12-28, expected=2026-10-23 (mppWD=170, dev=66d)
+      START Analyse meeting minutes: MPP=2026-10-28, D365=2026-12-29, expected=2026-10-26 (mppWD=171, dev=64d)
+      END   Analyse meeting minutes: MPP=2026-10-28, D365=2026-12-29, expected=2026-10-26 (mppWD=171, dev=64d)
+      START Configure deployment plan: MPP=2026-10-03, D365=2026-12-30, expected=2026-10-01 (mppWD=154, dev=90d)
+      END   Configure deployment plan: MPP=2026-10-28, D365=2027-01-22, expected=2026-10-26 (mppWD=171, dev=88d)
+      START Configure stakeholder matrix: MPP=2026-10-29, D365=2027-01-25, expected=2026-10-27 (mppWD=172, dev=90d)
+      END   Configure stakeholder matrix: MPP=2026-11-20, D365=2027-02-16, expected=2026-11-18 (mppWD=188, dev=90d)
+      START Review performance baseline: MPP=2026-11-21, D365=2027-02-17, expected=2026-11-19 (mppWD=189, dev=90d)
+      END   Review performance baseline: MPP=2026-12-15, D365=2027-03-11, expected=2026-12-11 (mppWD=205, dev=90d)
+      START Migrate budget: MPP=2026-05-29, D365=2026-07-14, expected=2026-05-27 (mppWD=63, dev=48d)
+      END   Migrate budget: MPP=2026-06-11, D365=2026-07-27, expected=2026-06-09 (mppWD=72, dev=48d)
+      START Configure quality plan: MPP=2026-06-12, D365=2026-07-28, expected=2026-06-10 (mppWD=73, dev=48d)
+      END   Configure quality plan: MPP=2026-06-16, D365=2026-07-30, expected=2026-06-12 (mppWD=75, dev=48d)
+      START [S] Planning - Analyse quality plan: MPP=2026-06-17, D365=2026-07-31, expected=2026-06-15 (mppWD=76, dev=46d)
+      END   [S] Planning - Analyse quality plan: MPP=2026-08-13, D365=2026-09-28, expected=2026-08-11 (mppWD=117, dev=48d)
+      START Audit test cases: MPP=2026-06-17, D365=2026-07-31, expected=2026-06-15 (mppWD=76, dev=46d)
+      END   Audit test cases: MPP=2026-07-08, D365=2026-08-21, expected=2026-07-06 (mppWD=91, dev=46d)
+      START Schedule cutover plan: MPP=2026-07-09, D365=2026-08-24, expected=2026-07-07 (mppWD=92, dev=48d)
+      END   Schedule cutover plan: MPP=2026-07-16, D365=2026-08-31, expected=2026-07-14 (mppWD=97, dev=48d)
+      START [S] Planning - Analyse quality plan - Test design documents: MPP=2026-07-17, D365=2026-09-01, expected=2026-07-15 (mppWD=98, dev=48d)
+      END   [S] Planning - Analyse quality plan - Test design documents: MPP=2026-08-13, D365=2026-09-28, expected=2026-08-11 (mppWD=117, dev=48d)
+      START [S] Planning - Analyse quality plan - Test design documents - Approve interface design: MPP=2026-07-17, D365=2026-09-01, expected=2026-07-15 (mppWD=98, dev=48d)
+      END   [S] Planning - Analyse quality plan - Test design documents - Approve interface design: MPP=2026-08-13, D365=2026-09-28, expected=2026-08-11 (mppWD=117, dev=48d)
+      START Migrate milestone report: MPP=2026-07-17, D365=2026-09-01, expected=2026-07-15 (mppWD=98, dev=48d)
+      END   Migrate milestone report: MPP=2026-07-29, D365=2026-09-11, expected=2026-07-27 (mppWD=106, dev=46d)
+      START Schedule design documents: MPP=2026-07-30, D365=2026-09-14, expected=2026-07-28 (mppWD=107, dev=48d)
+      END   Schedule design documents: MPP=2026-08-05, D365=2026-09-18, expected=2026-08-03 (mppWD=111, dev=46d)
+      START Audit cutover plan: MPP=2026-08-06, D365=2026-09-21, expected=2026-08-04 (mppWD=112, dev=48d)
+      END   Audit cutover plan: MPP=2026-08-13, D365=2026-09-28, expected=2026-08-11 (mppWD=117, dev=48d)
+      END   [S] Planning - Implement milestone report: MPP=2026-03-18, D365=2026-03-24, expected=2026-03-16 (mppWD=11, dev=8d)
+      START [S] Planning - Implement milestone report - Approve deployment plan: MPP=2026-03-05, D365=2026-03-05, expected=2026-03-03 (mppWD=2, dev=2d)
+      END   [S] Planning - Implement milestone report - Approve deployment plan: MPP=2026-03-18, D365=2026-03-24, expected=2026-03-16 (mppWD=11, dev=8d)
+      START [S] Planning - Implement milestone report - Approve deployment plan - Prepare acceptance criteria: MPP=2026-03-05, D365=2026-03-05, expected=2026-03-03 (mppWD=2, dev=2d)
+      END   [S] Planning - Implement milestone report - Approve deployment plan - Prepare acceptance criteria: MPP=2026-03-18, D365=2026-03-24, expected=2026-03-16 (mppWD=11, dev=8d)
+      START [S] Planning - Implement milestone report - Approve deployment plan - Prepare acceptance criteria - Deploy user guide: MPP=2026-03-05, D365=2026-03-05, expected=2026-03-03 (mppWD=2, dev=2d)
+      END   [S] Planning - Implement milestone report - Approve deployment plan - Prepare acceptance criteria - Deploy user guide: MPP=2026-03-12, D365=2026-03-18, expected=2026-03-10 (mppWD=7, dev=8d)
+      START Deliver work breakdown structure: MPP=2026-03-05, D365=2026-03-11, expected=2026-03-03 (mppWD=2, dev=8d)
+      END   Deliver work breakdown structure: MPP=2026-03-12, D365=2026-03-18, expected=2026-03-10 (mppWD=7, dev=8d)
+      START Review test cases: MPP=2026-03-13, D365=2026-03-19, expected=2026-03-11 (mppWD=8, dev=8d)
+      END   Review test cases: MPP=2026-03-18, D365=2026-03-24, expected=2026-03-16 (mppWD=11, dev=8d)
+      END   [S] Data Management: MPP=2027-01-27, D365=2027-05-05, expected=2027-01-25 (mppWD=236, dev=100d)
+      END   Resolve issue log: MPP=2026-03-14, D365=2026-03-02, expected=2026-03-12 (mppWD=9, dev=-10d)
+      START Prepare cutover plan: MPP=2026-03-17, D365=2026-03-03, expected=2026-03-13 (mppWD=10, dev=-10d)
+      END   Prepare cutover plan: MPP=2026-04-01, D365=2026-03-06, expected=2026-03-30 (mppWD=21, dev=-24d)
+      START [S] Data Management - Monitor budget: MPP=2026-03-17, D365=2026-02-27, expected=2026-03-13 (mppWD=10, dev=-14d)
+      END   [S] Data Management - Monitor budget: MPP=2026-09-26, D365=2027-04-14, expected=2026-09-24 (mppWD=149, dev=202d)
+      START Create meeting minutes: MPP=2026-03-17, D365=2026-03-06, expected=2026-03-13 (mppWD=10, dev=-7d)
+      END   Create meeting minutes: MPP=2026-03-20, D365=2026-03-06, expected=2026-03-18 (mppWD=13, dev=-12d)
+      START [S] Data Management - Monitor budget - Create rollback plan: MPP=2026-03-21, D365=2026-04-08, expected=2026-03-19 (mppWD=14, dev=20d)
+      END   [S] Data Management - Monitor budget - Create rollback plan: MPP=2026-08-07, D365=2026-10-05, expected=2026-08-05 (mppWD=113, dev=61d)
+      START Migrate design documents: MPP=2026-03-21, D365=2026-03-09, expected=2026-03-19 (mppWD=14, dev=-10d)
+      END   Migrate design documents: MPP=2026-04-15, D365=2026-03-30, expected=2026-04-13 (mppWD=31, dev=-14d)
+      START Finalise deployment plan: MPP=2026-07-28, D365=2026-09-23, expected=2026-07-24 (mppWD=105, dev=61d)
+      END   Finalise deployment plan: MPP=2026-08-07, D365=2026-10-05, expected=2026-08-05 (mppWD=113, dev=61d)
+      START Analyse test plan: MPP=2026-07-28, D365=2026-10-05, expected=2026-07-24 (mppWD=105, dev=73d)
+      END   Analyse test plan: MPP=2026-08-22, D365=2026-10-05, expected=2026-08-20 (mppWD=124, dev=46d)
+      START Create resource plan: MPP=2026-07-28, D365=2026-10-06, expected=2026-07-24 (mppWD=105, dev=74d)
+      END   Create resource plan: MPP=2026-07-28, D365=2026-10-06, expected=2026-07-24 (mppWD=105, dev=74d)
+      START [S] Data Management - Monitor budget - Audit requirements: MPP=2026-07-29, D365=2026-10-07, expected=2026-07-27 (mppWD=106, dev=72d)
+      END   [S] Data Management - Monitor budget - Audit requirements: MPP=2026-09-26, D365=2027-01-04, expected=2026-09-24 (mppWD=149, dev=102d)
+      START Create data model: MPP=2026-07-29, D365=2026-10-07, expected=2026-07-27 (mppWD=106, dev=72d)
+      END   Create data model: MPP=2026-08-22, D365=2026-11-02, expected=2026-08-20 (mppWD=124, dev=74d)
+      START [S] Data Management - Monitor budget - Audit requirements - Implement specifications: MPP=2026-08-25, D365=2026-11-03, expected=2026-08-21 (mppWD=125, dev=74d)
+      END   [S] Data Management - Monitor budget - Audit requirements - Implement specifications: MPP=2026-09-19, D365=2026-12-23, expected=2026-09-17 (mppWD=144, dev=97d)
+      START Document milestone report: MPP=2026-08-25, D365=2026-11-03, expected=2026-08-21 (mppWD=125, dev=74d)
+      END   Document milestone report: MPP=2026-09-19, D365=2026-11-30, expected=2026-09-17 (mppWD=144, dev=74d)
+      START Implement user guide: MPP=2026-08-25, D365=2026-12-01, expected=2026-08-21 (mppWD=125, dev=102d)
+      END   Implement user guide: MPP=2026-09-16, D365=2026-12-23, expected=2026-09-14 (mppWD=141, dev=100d)
+      START Review architecture: MPP=2026-09-17, D365=2026-12-24, expected=2026-09-15 (mppWD=142, dev=100d)
+      END   Review architecture: MPP=2026-09-26, D365=2027-01-04, expected=2026-09-24 (mppWD=149, dev=102d)
+      START Audit scope statement: MPP=2026-09-29, D365=2027-01-05, expected=2026-09-25 (mppWD=150, dev=102d)
+      END   Audit scope statement: MPP=2026-10-20, D365=2027-01-26, expected=2026-10-16 (mppWD=165, dev=102d)
+      START Finalise performance baseline: MPP=2026-10-20, D365=2027-01-26, expected=2026-10-16 (mppWD=165, dev=102d)
+      END   Finalise performance baseline: MPP=2026-10-20, D365=2027-01-26, expected=2026-10-16 (mppWD=165, dev=102d)
+      START Create issue log: MPP=2026-10-21, D365=2027-01-27, expected=2026-10-19 (mppWD=166, dev=100d)
+      END   Create issue log: MPP=2026-11-05, D365=2027-02-11, expected=2026-11-03 (mppWD=177, dev=100d)
+      END   [S] Data Management - Deliver test plan: MPP=2027-01-27, D365=2027-05-05, expected=2027-01-25 (mppWD=236, dev=100d)
+      START Document budget: MPP=2026-11-06, D365=2027-02-12, expected=2026-11-04 (mppWD=178, dev=100d)
+      END   Document budget: MPP=2026-11-25, D365=2027-03-03, expected=2026-11-23 (mppWD=191, dev=100d)
+      END   [S] Data Management - Deliver test plan - Update interface design: MPP=2027-01-27, D365=2027-05-05, expected=2027-01-25 (mppWD=236, dev=100d)
+      START Finalise design documents: MPP=2026-11-26, D365=2027-03-04, expected=2026-11-24 (mppWD=192, dev=100d)
+      END   Finalise design documents: MPP=2026-12-10, D365=2027-03-18, expected=2026-12-08 (mppWD=202, dev=100d)
+      START Update change request: MPP=2026-12-11, D365=2027-03-19, expected=2026-12-09 (mppWD=203, dev=100d)
+      END   Update change request: MPP=2026-12-29, D365=2027-04-06, expected=2026-12-25 (mppWD=215, dev=102d)
+      END   [S] Data Management - Deliver test plan - Update interface design - Monitor resource plan: MPP=2027-01-27, D365=2027-05-05, expected=2027-01-25 (mppWD=236, dev=100d)
+      END   [S] Data Management - Deliver test plan - Update interface design - Monitor resource plan - Update security policy: MPP=2027-01-27, D365=2027-05-05, expected=2027-01-25 (mppWD=236, dev=100d)
+      START Test architecture: MPP=2026-12-30, D365=2027-04-07, expected=2026-12-28 (mppWD=216, dev=100d)
+      END   Test architecture: MPP=2026-12-31, D365=2027-04-08, expected=2026-12-29 (mppWD=217, dev=100d)
+      START Develop deployment plan: MPP=2027-01-01, D365=2027-04-09, expected=2026-12-30 (mppWD=218, dev=100d)
+      END   Develop deployment plan: MPP=2027-01-27, D365=2027-05-05, expected=2027-01-25 (mppWD=236, dev=100d)
+      END   Schedule security policy: MPP=2026-03-24, D365=2026-03-02, expected=2026-03-20 (mppWD=15, dev=-18d)
+      END   [S] Design: MPP=2026-09-12, D365=2027-05-03, expected=2026-09-10 (mppWD=139, dev=235d)
+      END   [S] Design - Implement test cases: MPP=2026-09-12, D365=2026-10-28, expected=2026-09-10 (mppWD=139, dev=48d)
+      START Integrate work breakdown structure: MPP=2026-08-14, D365=2026-09-29, expected=2026-08-12 (mppWD=118, dev=48d)
+      END   Integrate work breakdown structure: MPP=2026-08-14, D365=2026-09-29, expected=2026-08-12 (mppWD=118, dev=48d)
+      START Evaluate interface design: MPP=2026-08-15, D365=2026-09-30, expected=2026-08-13 (mppWD=119, dev=48d)
+      END   Evaluate interface design: MPP=2026-08-29, D365=2026-10-14, expected=2026-08-27 (mppWD=129, dev=48d)
+      START Schedule rollback plan: MPP=2026-09-01, D365=2026-10-15, expected=2026-08-28 (mppWD=130, dev=48d)
+      END   Schedule rollback plan: MPP=2026-09-12, D365=2026-10-28, expected=2026-09-10 (mppWD=139, dev=48d)
+      START Create performance baseline: MPP=2026-09-12, D365=2026-10-28, expected=2026-09-10 (mppWD=139, dev=48d)
+      END   Create performance baseline: MPP=2026-09-12, D365=2026-10-28, expected=2026-09-10 (mppWD=139, dev=48d)
+      END   [S] Design - Implement test cases - Configure acceptance criteria: MPP=2026-06-04, D365=2026-08-04, expected=2026-06-02 (mppWD=67, dev=63d)
+      START Review security policy: MPP=2026-05-15, D365=2026-06-29, expected=2026-05-13 (mppWD=53, dev=47d)
+      END   Review security policy: MPP=2026-06-04, D365=2026-07-17, expected=2026-06-02 (mppWD=67, dev=45d)
+      START Evaluate risk register: MPP=2026-05-20, D365=2026-07-20, expected=2026-05-18 (mppWD=56, dev=63d)
+      END   Evaluate risk register: MPP=2026-05-26, D365=2026-07-24, expected=2026-05-22 (mppWD=60, dev=63d)
+      START Coordinate status report: MPP=2026-05-27, D365=2026-07-27, expected=2026-05-25 (mppWD=61, dev=63d)
+      END   Coordinate status report: MPP=2026-06-04, D365=2026-08-04, expected=2026-06-02 (mppWD=67, dev=63d)
+      START [S] Design - Conduct interface design: MPP=2026-06-06, D365=2026-07-09, expected=2026-06-04 (mppWD=69, dev=35d)
+      END   [S] Design - Conduct interface design: MPP=2026-07-16, D365=2027-05-03, expected=2026-07-14 (mppWD=97, dev=293d)
+      START Migrate data model: MPP=2026-06-06, D365=2026-07-09, expected=2026-06-04 (mppWD=69, dev=35d)
+      END   Migrate data model: MPP=2026-06-06, D365=2026-07-09, expected=2026-06-04 (mppWD=69, dev=35d)
+      START Validate resource plan: MPP=2026-06-09, D365=2026-07-10, expected=2026-06-05 (mppWD=70, dev=35d)
+      END   Validate resource plan: MPP=2026-06-20, D365=2026-07-23, expected=2026-06-18 (mppWD=79, dev=35d)
+      START Integrate interface design: MPP=2026-06-09, D365=2026-07-23, expected=2026-06-05 (mppWD=70, dev=48d)
+      END   Integrate interface design: MPP=2026-07-01, D365=2026-07-23, expected=2026-06-29 (mppWD=86, dev=24d)
+      START Conduct user guide: MPP=2026-07-02, D365=2026-07-24, expected=2026-06-30 (mppWD=87, dev=24d)
+      END   Conduct user guide: MPP=2026-07-16, D365=2026-08-07, expected=2026-07-14 (mppWD=97, dev=24d)
+      START [S] UAT: MPP=2026-07-17, D365=2026-02-27, expected=2026-07-15 (mppWD=98, dev=-138d)
+      END   [S] UAT: MPP=2026-12-23, D365=2027-01-22, expected=2026-12-21 (mppWD=211, dev=32d)
+      START Conduct test plan: MPP=2026-07-17, D365=2026-08-10, expected=2026-07-15 (mppWD=98, dev=26d)
+      END   Conduct test plan: MPP=2026-07-31, D365=2026-08-24, expected=2026-07-29 (mppWD=108, dev=26d)
+      START Integrate budget: MPP=2026-08-01, D365=2026-08-25, expected=2026-07-30 (mppWD=109, dev=26d)
+      END   Integrate budget: MPP=2026-08-08, D365=2026-09-01, expected=2026-08-06 (mppWD=114, dev=26d)
+      START [S] UAT - Migrate work breakdown structure: MPP=2026-08-11, D365=2026-02-27, expected=2026-08-07 (mppWD=115, dev=-161d)
+      END   [S] UAT - Migrate work breakdown structure: MPP=2026-09-23, D365=2026-10-20, expected=2026-09-21 (mppWD=146, dev=29d)
+      START Approve communication plan: MPP=2026-08-11, D365=2026-09-02, expected=2026-08-07 (mppWD=115, dev=26d)
+      END   Approve communication plan: MPP=2026-08-12, D365=2026-09-04, expected=2026-08-10 (mppWD=116, dev=25d)
+      START Review acceptance criteria: MPP=2026-08-11, D365=2026-09-07, expected=2026-08-07 (mppWD=115, dev=31d)
+      END   Review acceptance criteria: MPP=2026-08-20, D365=2026-09-16, expected=2026-08-18 (mppWD=122, dev=29d)
+      START Configure performance baseline: MPP=2026-08-21, D365=2026-09-17, expected=2026-08-19 (mppWD=123, dev=29d)
+      END   Configure performance baseline: MPP=2026-08-22, D365=2026-09-18, expected=2026-08-20 (mppWD=124, dev=29d)
+      START Review stakeholder matrix: MPP=2026-08-25, D365=2026-09-21, expected=2026-08-21 (mppWD=125, dev=31d)
+      END   Review stakeholder matrix: MPP=2026-08-26, D365=2026-09-22, expected=2026-08-24 (mppWD=126, dev=29d)
+      START Audit test plan: MPP=2026-08-27, D365=2026-09-23, expected=2026-08-25 (mppWD=127, dev=29d)
+      END   Audit test plan: MPP=2026-09-23, D365=2026-10-20, expected=2026-09-21 (mppWD=146, dev=29d)
+      START Audit architecture: MPP=2026-09-24, D365=2026-10-21, expected=2026-09-22 (mppWD=147, dev=29d)
+      END   Audit architecture: MPP=2026-10-06, D365=2026-11-02, expected=2026-10-02 (mppWD=155, dev=31d)
+      START [S] UAT - Conduct training materials: MPP=2026-10-07, D365=2026-11-03, expected=2026-10-05 (mppWD=156, dev=29d)
+      END   [S] UAT - Conduct training materials: MPP=2026-12-19, D365=2027-01-20, expected=2026-12-17 (mppWD=209, dev=34d)
+      START [S] UAT - Conduct training materials - Document performance baseline: MPP=2026-10-07, D365=2026-11-03, expected=2026-10-05 (mppWD=156, dev=29d)
+      END   [S] UAT - Conduct training materials - Document performance baseline: MPP=2026-11-10, D365=2026-12-07, expected=2026-11-06 (mppWD=180, dev=31d)
+      START Assess security policy: MPP=2026-10-07, D365=2026-11-03, expected=2026-10-05 (mppWD=156, dev=29d)
+      END   Assess security policy: MPP=2026-10-21, D365=2026-11-17, expected=2026-10-19 (mppWD=166, dev=29d)
+      START Resolve specifications: MPP=2026-10-22, D365=2026-11-18, expected=2026-10-20 (mppWD=167, dev=29d)
+      END   Resolve specifications: MPP=2026-11-10, D365=2026-12-07, expected=2026-11-06 (mppWD=180, dev=31d)
+      START Schedule user guide: MPP=2026-11-11, D365=2026-12-08, expected=2026-11-09 (mppWD=181, dev=29d)
+      END   Schedule user guide: MPP=2026-11-13, D365=2026-12-10, expected=2026-11-11 (mppWD=183, dev=29d)
+      START Migrate communication plan: MPP=2026-11-11, D365=2026-12-11, expected=2026-11-09 (mppWD=181, dev=32d)
+      END   Migrate communication plan: MPP=2026-12-05, D365=2027-01-06, expected=2026-12-03 (mppWD=199, dev=34d)
+      START Develop meeting minutes: MPP=2026-12-08, D365=2027-01-07, expected=2026-12-04 (mppWD=200, dev=34d)
+      END   Develop meeting minutes: MPP=2026-12-19, D365=2027-01-20, expected=2026-12-17 (mppWD=209, dev=34d)
+      START Assess acceptance criteria: MPP=2026-12-22, D365=2027-01-21, expected=2026-12-18 (mppWD=210, dev=34d)
+      END   Assess acceptance criteria: MPP=2026-12-23, D365=2027-01-22, expected=2026-12-21 (mppWD=211, dev=32d)
+      END   [S] Migration: MPP=2027-02-13, D365=2027-06-04, expected=2027-02-11 (mppWD=249, dev=113d)
+      END   [S] Migration - Analyse quality plan: MPP=2026-12-30, D365=2026-06-02, expected=2026-12-28 (mppWD=216, dev=-209d)
+      START Conduct security policy: MPP=2026-12-24, D365=2027-01-25, expected=2026-12-22 (mppWD=212, dev=34d)
+      END   Conduct security policy: MPP=2026-12-30, D365=2027-02-17, expected=2026-12-28 (mppWD=216, dev=51d)
+      END   [S] Migration - Analyse quality plan - Validate interface design: MPP=2026-05-21, D365=2026-06-02, expected=2026-05-19 (mppWD=57, dev=14d)
+      END   [S] Migration - Analyse quality plan - Validate interface design - Review acceptance criteria: MPP=2026-05-02, D365=2026-05-14, expected=2026-04-30 (mppWD=44, dev=14d)
+      START Configure architecture: MPP=2026-03-21, D365=2026-04-02, expected=2026-03-19 (mppWD=14, dev=14d)
+      END   Configure architecture: MPP=2026-04-16, D365=2026-04-28, expected=2026-04-14 (mppWD=32, dev=14d)
+      START Create quality plan: MPP=2026-04-17, D365=2026-04-29, expected=2026-04-15 (mppWD=33, dev=14d)
+      END   Create quality plan: MPP=2026-04-24, D365=2026-05-06, expected=2026-04-22 (mppWD=38, dev=14d)
+      START Develop change request: MPP=2026-04-25, D365=2026-05-07, expected=2026-04-23 (mppWD=39, dev=14d)
+      END   Develop change request: MPP=2026-05-02, D365=2026-05-14, expected=2026-04-30 (mppWD=44, dev=14d)
+      START Deploy architecture: MPP=2026-05-05, D365=2026-05-15, expected=2026-05-01 (mppWD=45, dev=14d)
+      END   Deploy architecture: MPP=2026-05-21, D365=2026-06-02, expected=2026-05-19 (mppWD=57, dev=14d)
+      START Coordinate work breakdown structure: MPP=2026-06-05, D365=2026-08-05, expected=2026-06-03 (mppWD=68, dev=63d)
+      END   Coordinate work breakdown structure: MPP=2026-07-01, D365=2026-08-31, expected=2026-06-29 (mppWD=86, dev=63d)
+      END   [S] Migration - Deploy test cases: MPP=2026-06-26, D365=2026-09-10, expected=2026-06-24 (mppWD=83, dev=78d)
+      START Schedule requirements: MPP=2026-06-05, D365=2026-08-31, expected=2026-06-03 (mppWD=68, dev=89d)
+      END   Schedule requirements: MPP=2026-06-16, D365=2026-08-31, expected=2026-06-12 (mppWD=75, dev=80d)
+      START Resolve requirements: MPP=2026-06-17, D365=2026-09-01, expected=2026-06-15 (mppWD=76, dev=78d)
+      END   Resolve requirements: MPP=2026-06-26, D365=2026-09-10, expected=2026-06-24 (mppWD=83, dev=78d)
+      END   [S] Migration - Evaluate quality plan: MPP=2026-10-02, D365=2026-12-29, expected=2026-09-30 (mppWD=153, dev=90d)
+      END   Document work breakdown structure: MPP=2026-04-08, D365=2026-04-21, expected=2026-04-06 (mppWD=26, dev=15d)
+      END   Create requirements: MPP=2026-03-27, D365=2026-03-30, expected=2026-03-25 (mppWD=18, dev=5d)
+      START [S] Migration - Evaluate quality plan - Schedule deployment plan: MPP=2026-03-25, D365=2026-03-31, expected=2026-03-23 (mppWD=16, dev=8d)
+      END   [S] Migration - Evaluate quality plan - Schedule deployment plan: MPP=2026-10-02, D365=2026-12-29, expected=2026-09-30 (mppWD=153, dev=90d)
+      START Prepare risk register: MPP=2026-03-25, D365=2026-03-31, expected=2026-03-23 (mppWD=16, dev=8d)
+      END   Prepare risk register: MPP=2026-04-15, D365=2026-04-21, expected=2026-04-13 (mppWD=31, dev=8d)
+      START Analyse change request: MPP=2026-04-16, D365=2026-04-22, expected=2026-04-14 (mppWD=32, dev=8d)
+      END   Analyse change request: MPP=2026-05-01, D365=2026-05-07, expected=2026-04-29 (mppWD=43, dev=8d)
+      START [S] Migration - Evaluate quality plan - Schedule deployment plan - Deploy performance baseline: MPP=2026-09-18, D365=2026-11-26, expected=2026-09-16 (mppWD=143, dev=71d)
+      END   [S] Migration - Evaluate quality plan - Schedule deployment plan - Deploy performance baseline: MPP=2026-10-02, D365=2026-12-29, expected=2026-09-30 (mppWD=153, dev=90d)
+      START Coordinate meeting minutes: MPP=2026-09-19, D365=2026-11-27, expected=2026-09-17 (mppWD=144, dev=71d)
+      END   Coordinate meeting minutes: MPP=2026-10-02, D365=2026-12-10, expected=2026-09-30 (mppWD=153, dev=71d)
+      START Update work breakdown structure: MPP=2026-09-19, D365=2026-12-11, expected=2026-09-17 (mppWD=144, dev=85d)
+      END   Update work breakdown structure: MPP=2026-09-30, D365=2026-12-22, expected=2026-09-28 (mppWD=151, dev=85d)
+      START Configure cutover plan: MPP=2026-09-19, D365=2026-12-23, expected=2026-09-17 (mppWD=144, dev=97d)
+      END   Configure cutover plan: MPP=2026-09-25, D365=2026-12-29, expected=2026-09-23 (mppWD=148, dev=97d)
+      START Configure requirements: MPP=2026-09-18, D365=2026-11-26, expected=2026-09-16 (mppWD=143, dev=71d)
+      END   Configure requirements: MPP=2026-09-18, D365=2026-11-26, expected=2026-09-16 (mppWD=143, dev=71d)
+      START Integrate resource plan: MPP=2026-09-18, D365=2026-11-26, expected=2026-09-16 (mppWD=143, dev=71d)
+      END   Integrate resource plan: MPP=2026-09-18, D365=2026-11-26, expected=2026-09-16 (mppWD=143, dev=71d)
+      START Review requirements: MPP=2026-09-19, D365=2026-11-27, expected=2026-09-17 (mppWD=144, dev=71d)
+      END   Review requirements: MPP=2026-09-19, D365=2026-11-27, expected=2026-09-17 (mppWD=144, dev=71d)
+      START [S] Migration - Finalise user guide: MPP=2026-12-31, D365=2026-03-06, expected=2026-12-29 (mppWD=217, dev=-298d)
+      END   [S] Migration - Finalise user guide: MPP=2027-02-13, D365=2027-06-04, expected=2027-02-11 (mppWD=249, dev=113d)
+      START [S] Migration - Finalise user guide - Approve design documents: MPP=2026-12-31, D365=2026-03-06, expected=2026-12-29 (mppWD=217, dev=-298d)
+      END   [S] Migration - Finalise user guide - Approve design documents: MPP=2027-02-13, D365=2027-06-04, expected=2027-02-11 (mppWD=249, dev=113d)
+      START Analyse resource plan: MPP=2026-12-31, D365=2027-04-08, expected=2026-12-29 (mppWD=217, dev=100d)
+      END   Analyse resource plan: MPP=2026-12-31, D365=2027-04-08, expected=2026-12-29 (mppWD=217, dev=100d)
+      START Create meeting minutes: MPP=2026-12-31, D365=2027-04-09, expected=2026-12-29 (mppWD=217, dev=101d)
+      END   Create meeting minutes: MPP=2026-12-31, D365=2027-04-14, expected=2026-12-29 (mppWD=217, dev=106d)
+      START Implement test plan: MPP=2027-01-01, D365=2027-04-15, expected=2026-12-30 (mppWD=218, dev=106d)
+      END   Implement test plan: MPP=2027-01-20, D365=2027-05-04, expected=2027-01-18 (mppWD=231, dev=106d)
+      START Review rollback plan: MPP=2027-01-21, D365=2027-05-05, expected=2027-01-19 (mppWD=232, dev=106d)
+      END   Review rollback plan: MPP=2027-02-13, D365=2027-05-28, expected=2027-02-11 (mppWD=249, dev=106d)
+      START Develop status report: MPP=2027-01-21, D365=2027-05-28, expected=2027-01-19 (mppWD=232, dev=129d)
+      END   Develop status report: MPP=2027-02-06, D365=2027-05-28, expected=2027-02-04 (mppWD=244, dev=113d)
+      START Update architecture: MPP=2027-01-21, D365=2027-05-31, expected=2027-01-19 (mppWD=232, dev=132d)
+      END   Update architecture: MPP=2027-01-27, D365=2027-06-04, expected=2027-01-25 (mppWD=236, dev=130d)
+      START Integrate interface design: MPP=2026-12-31, D365=2027-04-09, expected=2026-12-29 (mppWD=217, dev=101d)
+      END   Integrate interface design: MPP=2026-12-31, D365=2027-05-03, expected=2026-12-29 (mppWD=217, dev=125d)
+      START Finalise scope statement: MPP=2027-01-01, D365=2027-05-04, expected=2026-12-30 (mppWD=218, dev=125d)
+      END   Finalise scope statement: MPP=2027-01-07, D365=2027-05-20, expected=2027-01-05 (mppWD=222, dev=135d)
+      START [S] Training: MPP=2026-12-23, D365=2026-02-27, expected=2026-12-21 (mppWD=211, dev=-297d)
+      END   [S] Training: MPP=2027-04-13, D365=2027-08-04, expected=2027-04-09 (mppWD=290, dev=117d)
+      START Monitor interface design: MPP=2027-01-08, D365=2027-05-21, expected=2027-01-06 (mppWD=223, dev=135d)
+      END   Monitor interface design: MPP=2027-01-29, D365=2027-06-11, expected=2027-01-27 (mppWD=238, dev=135d)
+      START [S] Training - Migrate acceptance criteria: MPP=2027-01-30, D365=2026-02-27, expected=2027-01-28 (mppWD=239, dev=-335d)
+      END   [S] Training - Migrate acceptance criteria: MPP=2027-03-31, D365=2027-08-04, expected=2027-03-29 (mppWD=281, dev=128d)
+      START Implement project charter: MPP=2027-01-30, D365=2027-06-14, expected=2027-01-28 (mppWD=239, dev=137d)
+      END   Implement project charter: MPP=2027-02-09, D365=2027-06-22, expected=2027-02-05 (mppWD=245, dev=137d)
+      START Integrate status report: MPP=2027-02-10, D365=2027-06-23, expected=2027-02-08 (mppWD=246, dev=135d)
+      END   Integrate status report: MPP=2027-02-25, D365=2027-07-08, expected=2027-02-23 (mppWD=257, dev=135d)
+      START Deliver user guide: MPP=2027-02-26, D365=2027-07-09, expected=2027-02-24 (mppWD=258, dev=135d)
+      END   Deliver user guide: MPP=2027-03-24, D365=2027-08-04, expected=2027-03-22 (mppWD=276, dev=135d)
+      START Analyse security policy: MPP=2027-03-25, D365=2026-02-27, expected=2027-03-23 (mppWD=277, dev=-389d)
+      END   Analyse security policy: MPP=2027-03-31, D365=2026-03-05, expected=2027-03-29 (mppWD=281, dev=-389d)
+      START [S] Training - Assess operations manual: MPP=2026-12-23, D365=2026-02-27, expected=2026-12-21 (mppWD=211, dev=-297d)
+      END   [S] Training - Assess operations manual: MPP=2027-03-31, D365=2026-03-17, expected=2027-03-29 (mppWD=281, dev=-377d)
+      START [S] Training - Assess operations manual - Integrate meeting minutes: MPP=2026-12-23, D365=2026-02-27, expected=2026-12-21 (mppWD=211, dev=-297d)
+      END   [S] Training - Assess operations manual - Integrate meeting minutes: MPP=2027-03-31, D365=2026-03-17, expected=2027-03-29 (mppWD=281, dev=-377d)
+      START [S] Training - Assess operations manual - Integrate meeting minutes - Conduct stakeholder matrix: MPP=2026-12-23, D365=2026-02-27, expected=2026-12-21 (mppWD=211, dev=-297d)
+      END   [S] Training - Assess operations manual - Integrate meeting minutes - Conduct stakeholder matrix: MPP=2027-03-31, D365=2026-03-09, expected=2027-03-29 (mppWD=281, dev=-385d)
+      START [S] Training - Assess operations manual - Integrate meeting minutes - Conduct stakeholder matrix - Analyse operations manual: MPP=2026-12-23, D365=2026-02-27, expected=2026-12-21 (mppWD=211, dev=-297d)
+      END   [S] Training - Assess operations manual - Integrate meeting minutes - Conduct stakeholder matrix - Analyse operations manual: MPP=2027-03-31, D365=2026-03-09, expected=2027-03-29 (mppWD=281, dev=-385d)
+      START [S] Training - Assess operations manual - Integrate meeting minutes - Conduct stakeholder matrix - Analyse operations manual - Finalise rollback plan: MPP=2026-12-23, D365=2026-02-27, expected=2026-12-21 (mppWD=211, dev=-297d)
+      END   [S] Training - Assess operations manual - Integrate meeting minutes - Conduct stakeholder matrix - Analyse operations manual - Finalise rollback plan: MPP=2027-03-31, D365=2026-03-09, expected=2027-03-29 (mppWD=281, dev=-385d)
+      START Review resource plan: MPP=2027-03-23, D365=2026-02-27, expected=2027-03-19 (mppWD=275, dev=-385d)
+      END   Review resource plan: MPP=2027-03-31, D365=2026-03-09, expected=2027-03-29 (mppWD=281, dev=-385d)
+      START Schedule security policy: MPP=2026-12-23, D365=2026-02-27, expected=2026-12-21 (mppWD=211, dev=-297d)
+      END   Schedule security policy: MPP=2026-12-23, D365=2026-03-18, expected=2026-12-21 (mppWD=211, dev=-278d)
+      START Migrate acceptance criteria: MPP=2026-12-23, D365=2026-02-27, expected=2026-12-21 (mppWD=211, dev=-297d)
+      END   Migrate acceptance criteria: MPP=2026-12-23, D365=2026-02-27, expected=2026-12-21 (mppWD=211, dev=-297d)
+      START Develop change request: MPP=2026-12-24, D365=2026-02-27, expected=2026-12-22 (mppWD=212, dev=-298d)
+      END   Develop change request: MPP=2027-01-09, D365=2026-03-17, expected=2027-01-07 (mppWD=224, dev=-296d)
+      START Create deployment plan: MPP=2026-12-24, D365=2026-02-27, expected=2026-12-22 (mppWD=212, dev=-298d)
+      END   Create deployment plan: MPP=2027-01-05, D365=2026-03-11, expected=2027-01-01 (mppWD=220, dev=-296d)
+      START Deliver risk register: MPP=2026-12-24, D365=2026-02-27, expected=2026-12-22 (mppWD=212, dev=-298d)
+      END   Deliver risk register: MPP=2027-01-02, D365=2026-03-10, expected=2026-12-31 (mppWD=219, dev=-296d)
+      START [S] Training - Integrate test plan: MPP=2027-01-05, D365=2026-02-27, expected=2027-01-01 (mppWD=220, dev=-308d)
+      END   [S] Training - Integrate test plan: MPP=2027-02-16, D365=2027-02-17, expected=2027-02-12 (mppWD=250, dev=5d)
+      START Monitor architecture: MPP=2027-01-05, D365=2026-02-27, expected=2027-01-01 (mppWD=220, dev=-308d)
+      END   Monitor architecture: MPP=2027-01-16, D365=2026-03-12, expected=2027-01-14 (mppWD=229, dev=-308d)
+      START [S] Training - Integrate test plan - Review design documents: MPP=2027-01-19, D365=2026-02-27, expected=2027-01-15 (mppWD=230, dev=-322d)
+      END   [S] Training - Integrate test plan - Review design documents: MPP=2027-02-16, D365=2027-02-17, expected=2027-02-12 (mppWD=250, dev=5d)
+      START Conduct budget: MPP=2027-01-19, D365=2026-02-27, expected=2027-01-15 (mppWD=230, dev=-322d)
+      END   Conduct budget: MPP=2027-01-21, D365=2026-03-03, expected=2027-01-19 (mppWD=232, dev=-322d)
+      START Deliver stakeholder matrix: MPP=2027-01-22, D365=2026-02-27, expected=2027-01-20 (mppWD=233, dev=-327d)
+      END   Deliver stakeholder matrix: MPP=2027-01-27, D365=2026-03-04, expected=2027-01-25 (mppWD=236, dev=-327d)
+      START Conduct security policy: MPP=2027-01-22, D365=2026-02-27, expected=2027-01-20 (mppWD=233, dev=-327d)
+      END   Conduct security policy: MPP=2027-02-16, D365=2026-03-05, expected=2027-02-12 (mppWD=250, dev=-344d)
+      START Finalise operations manual: MPP=2027-02-06, D365=2026-02-27, expected=2027-02-04 (mppWD=244, dev=-342d)
+      END   Finalise operations manual: MPP=2027-02-16, D365=2026-03-09, expected=2027-02-12 (mppWD=250, dev=-340d)
+      START [S] Training - Create cutover plan: MPP=2027-02-17, D365=2026-02-27, expected=2027-02-15 (mppWD=251, dev=-353d)
+      END   [S] Training - Create cutover plan: MPP=2027-04-07, D365=2026-09-04, expected=2027-04-05 (mppWD=286, dev=-213d)
+      START Analyse test cases: MPP=2027-02-17, D365=2026-02-27, expected=2027-02-15 (mppWD=251, dev=-353d)
+      END   Analyse test cases: MPP=2027-03-10, D365=2026-03-20, expected=2027-03-08 (mppWD=266, dev=-353d)
+      START Prepare project charter: MPP=2027-03-11, D365=2026-02-27, expected=2027-03-09 (mppWD=267, dev=-375d)
+      END   Prepare project charter: MPP=2027-03-27, D365=2026-03-17, expected=2027-03-25 (mppWD=279, dev=-373d)
+      START Approve communication plan: MPP=2027-03-25, D365=2026-02-27, expected=2027-03-23 (mppWD=277, dev=-389d)
+      END   Approve communication plan: MPP=2027-03-27, D365=2026-03-02, expected=2027-03-25 (mppWD=279, dev=-388d)
+      START Evaluate requirements: MPP=2027-03-25, D365=2026-02-27, expected=2027-03-23 (mppWD=277, dev=-389d)
+      END   Evaluate requirements: MPP=2027-04-07, D365=2026-03-12, expected=2027-04-05 (mppWD=286, dev=-389d)
+      START Prepare cutover plan: MPP=2027-04-08, D365=2026-02-27, expected=2027-04-06 (mppWD=287, dev=-403d)
+      END   Prepare cutover plan: MPP=2027-04-13, D365=2026-03-16, expected=2027-04-09 (mppWD=290, dev=-389d)
+      START [S] Risk Assessment: MPP=2026-08-26, D365=2026-02-27, expected=2026-08-24 (mppWD=126, dev=-178d)
+      END   [S] Risk Assessment: MPP=2027-06-19, D365=2026-12-28, expected=2027-06-17 (mppWD=339, dev=-171d)
+      START Assess work breakdown structure: MPP=2027-04-14, D365=2026-02-27, expected=2027-04-12 (mppWD=291, dev=-409d)
+      END   Assess work breakdown structure: MPP=2027-05-01, D365=2026-03-18, expected=2027-04-29 (mppWD=304, dev=-407d)
+      START [S] Risk Assessment - Finalise test cases: MPP=2026-08-26, D365=2026-02-27, expected=2026-08-24 (mppWD=126, dev=-178d)
+      END   [S] Risk Assessment - Finalise test cases: MPP=2027-06-19, D365=2026-12-28, expected=2027-06-17 (mppWD=339, dev=-171d)
+      START Schedule test cases: MPP=2027-05-04, D365=2026-02-27, expected=2027-04-30 (mppWD=305, dev=-427d)
+      END   Schedule test cases: MPP=2027-05-29, D365=2026-02-27, expected=2027-05-27 (mppWD=324, dev=-454d)
+      START Evaluate risk register: MPP=2027-06-01, D365=2026-02-27, expected=2027-05-28 (mppWD=325, dev=-455d)
+      END   Evaluate risk register: MPP=2027-06-19, D365=2026-03-19, expected=2027-06-17 (mppWD=339, dev=-455d)
+      START Test communication plan: MPP=2026-08-26, D365=2026-02-27, expected=2026-08-24 (mppWD=126, dev=-178d)
+      END   Test communication plan: MPP=2026-08-26, D365=2026-02-27, expected=2026-08-24 (mppWD=126, dev=-178d)
+      START Document operations manual: MPP=2026-08-27, D365=2026-02-27, expected=2026-08-25 (mppWD=127, dev=-179d)
+      END   Document operations manual: MPP=2026-09-18, D365=2026-03-24, expected=2026-09-16 (mppWD=143, dev=-176d)
+      START [S] Risk Assessment - Finalise test cases - Schedule security policy: MPP=2026-09-19, D365=2026-02-27, expected=2026-09-17 (mppWD=144, dev=-202d)
+      END   [S] Risk Assessment - Finalise test cases - Schedule security policy: MPP=2027-04-22, D365=2026-12-28, expected=2027-04-20 (mppWD=297, dev=-113d)
+      START Deliver data model: MPP=2026-09-19, D365=2026-02-27, expected=2026-09-17 (mppWD=144, dev=-202d)
+      END   Deliver data model: MPP=2026-10-09, D365=2026-03-26, expected=2026-10-07 (mppWD=158, dev=-195d)
+      START [S] Risk Assessment - Finalise test cases - Schedule security policy - Deploy resource plan: MPP=2026-10-10, D365=2026-02-27, expected=2026-10-08 (mppWD=159, dev=-223d)
+      END   [S] Risk Assessment - Finalise test cases - Schedule security policy - Deploy resource plan: MPP=2027-04-22, D365=2026-07-01, expected=2027-04-20 (mppWD=297, dev=-293d)
+      START Create rollback plan: MPP=2026-10-10, D365=2026-02-27, expected=2026-10-08 (mppWD=159, dev=-223d)
+      END   Create rollback plan: MPP=2026-11-06, D365=2026-03-23, expected=2026-11-04 (mppWD=178, dev=-226d)
+      START Configure specifications: MPP=2027-04-01, D365=2026-02-27, expected=2027-03-30 (mppWD=282, dev=-396d)
+      END   Configure specifications: MPP=2027-04-22, D365=2026-03-20, expected=2027-04-20 (mppWD=297, dev=-396d)
+      START Schedule interface design: MPP=2027-04-01, D365=2026-02-27, expected=2027-03-30 (mppWD=282, dev=-396d)
+      END   Schedule interface design: MPP=2027-04-10, D365=2026-03-10, expected=2027-04-08 (mppWD=289, dev=-394d)
+      START Document test cases: MPP=2027-04-13, D365=2026-02-27, expected=2027-04-09 (mppWD=290, dev=-406d)
+      END   Document test cases: MPP=2027-04-13, D365=2026-02-27, expected=2027-04-09 (mppWD=290, dev=-406d)
+      START Create test cases: MPP=2027-04-14, D365=2026-02-27, expected=2027-04-12 (mppWD=291, dev=-409d)
+      END   Create test cases: MPP=2027-04-22, D365=2026-03-09, expected=2027-04-20 (mppWD=297, dev=-407d)
+      START [S] Risk Assessment - Deliver communication plan: MPP=2026-08-26, D365=2026-02-27, expected=2026-08-24 (mppWD=126, dev=-178d)
+      END   [S] Risk Assessment - Deliver communication plan: MPP=2027-01-21, D365=2026-03-19, expected=2027-01-19 (mppWD=232, dev=-306d)
+      START Deliver stakeholder matrix: MPP=2026-08-26, D365=2026-02-27, expected=2026-08-24 (mppWD=126, dev=-178d)
+      END   Deliver stakeholder matrix: MPP=2026-08-26, D365=2026-02-27, expected=2026-08-24 (mppWD=126, dev=-178d)
+      START Resolve issue log: MPP=2026-08-27, D365=2026-02-27, expected=2026-08-25 (mppWD=127, dev=-179d)
+      END   Resolve issue log: MPP=2026-08-28, D365=2026-03-12, expected=2026-08-26 (mppWD=128, dev=-167d)
+      START Conduct cutover plan: MPP=2026-08-29, D365=2026-02-27, expected=2026-08-27 (mppWD=129, dev=-181d)
+      END   Conduct cutover plan: MPP=2026-09-18, D365=2026-03-19, expected=2026-09-16 (mppWD=143, dev=-181d)
+      START Conduct rollback plan: MPP=2027-01-20, D365=2026-02-27, expected=2027-01-18 (mppWD=231, dev=-325d)
+      END   Conduct rollback plan: MPP=2027-01-21, D365=2026-03-02, expected=2027-01-19 (mppWD=232, dev=-323d)
+      START [S] Risk Assessment - Finalise communication plan: MPP=2027-01-22, D365=2026-02-27, expected=2027-01-20 (mppWD=233, dev=-327d)
+      END   [S] Risk Assessment - Finalise communication plan: MPP=2027-05-04, D365=2026-03-20, expected=2027-04-30 (mppWD=305, dev=-406d)
+      START [S] Risk Assessment - Finalise communication plan - Conduct architecture: MPP=2027-01-22, D365=2026-02-27, expected=2027-01-20 (mppWD=233, dev=-327d)
+      END   [S] Risk Assessment - Finalise communication plan - Conduct architecture: MPP=2027-05-04, D365=2026-03-20, expected=2027-04-30 (mppWD=305, dev=-406d)
+      START [S] Risk Assessment - Finalise communication plan - Conduct architecture - Deliver risk register: MPP=2027-01-22, D365=2026-02-27, expected=2027-01-20 (mppWD=233, dev=-327d)
+      END   [S] Risk Assessment - Finalise communication plan - Conduct architecture - Deliver risk register: MPP=2027-04-20, D365=2026-03-20, expected=2027-04-16 (mppWD=295, dev=-392d)
+      START Develop test cases: MPP=2027-01-22, D365=2026-02-27, expected=2027-01-20 (mppWD=233, dev=-327d)
+      END   Develop test cases: MPP=2027-02-12, D365=2026-03-20, expected=2027-02-10 (mppWD=248, dev=-327d)
+      START Deploy issue log: MPP=2027-04-14, D365=2026-02-27, expected=2027-04-12 (mppWD=291, dev=-409d)
+      END   Deploy issue log: MPP=2027-04-20, D365=2026-03-05, expected=2027-04-16 (mppWD=295, dev=-407d)
+      START Conduct work breakdown structure: MPP=2027-04-14, D365=2026-02-27, expected=2027-04-12 (mppWD=291, dev=-409d)
+      END   Conduct work breakdown structure: MPP=2027-04-15, D365=2026-03-02, expected=2027-04-13 (mppWD=292, dev=-407d)
+      START Conduct quality plan: MPP=2027-04-16, D365=2026-02-27, expected=2027-04-14 (mppWD=293, dev=-411d)
+      END   Conduct quality plan: MPP=2027-05-04, D365=2026-03-17, expected=2027-04-30 (mppWD=305, dev=-409d)
+      START Analyse training materials: MPP=2027-04-28, D365=2026-02-27, expected=2027-04-26 (mppWD=301, dev=-423d)
+      END   Analyse training materials: MPP=2027-05-04, D365=2026-03-05, expected=2027-04-30 (mppWD=305, dev=-421d)
+
+    Cleaning up test records...
+
+Querying project tasks for project 20bdde2d-d113-f111-8341-6045bde6e505...
+  Found 300 project task(s) and 200 dependency record(s).
+
+Creating OperationSet for deletion...
+  OperationSet: a60d1efa-d113-f111-8341-6045bde6e505
+  Queued 200 dependency deletes.
+    [0] Lvl 7: Migrate acceptance criteria (c02437a2-97dd-4a90-b31b-6fe66ac0f6f8)
+    Cleanup warning: ScheduleAPI-OV-0003:a60d1efa-d113-f111-8341-6045bde6e505: The maximum number of requests allowed in an operation set is 200.
+  OVERALL: PASS (2 checks, 539 warnings)
+
+================================================================
+  FINAL: 1 passed, 0 failed out of 1
+    PASS  Generated_300tasks.mpp  (2 checks, 539 warnings, 62 dep issues)
+================================================================

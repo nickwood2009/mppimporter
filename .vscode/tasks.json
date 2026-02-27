@@ -1,0 +1,71 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build",
+            "command": "msbuild",
+            "type": "process",
+            "args": [
+                "${workspaceFolder}/ADC.MppImport.Test/ADC.MppImport.Test.csproj",
+                "-v:minimal"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": "$msCompile",
+            "presentation": {
+                "reveal": "silent"
+            }
+        },
+        {
+            "label": "Run: Regtest (all MPP files)",
+            "type": "shell",
+            "command": "${workspaceFolder}/ADC.MppImport.Test/bin/Debug/ADC.MppImport.Test.exe",
+            "args": ["regtest"],
+            "options": {
+                "cwd": "${workspaceFolder}/ADC.MppImport.Test"
+            },
+            "dependsOn": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated"
+            },
+            "group": "test"
+        },
+        {
+            "label": "Run: Parse MPP file",
+            "type": "shell",
+            "command": "${workspaceFolder}/ADC.MppImport.Test/bin/Debug/ADC.MppImport.Test.exe",
+            "args": ["parse", "${workspaceFolder}/exampleFiles/Duty Assessment - Draft.mpp"],
+            "options": {
+                "cwd": "${workspaceFolder}/ADC.MppImport.Test"
+            },
+            "dependsOn": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated"
+            }
+        },
+        {
+            "label": "Run: Interactive Menu",
+            "type": "shell",
+            "command": "${workspaceFolder}/ADC.MppImport.Test/bin/Debug/ADC.MppImport.Test.exe",
+            "args": [],
+            "options": {
+                "cwd": "${workspaceFolder}/ADC.MppImport.Test"
+            },
+            "dependsOn": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated"
+            }
+        }
+    ]
+}

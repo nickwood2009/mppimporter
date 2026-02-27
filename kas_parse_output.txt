@@ -1,0 +1,113 @@
+
+File: Kas Case Management Template 1.mpp (7,617,536 bytes)
+MPP Type:     14
+Tasks:        101
+Resources:    92
+Assignments:  124
+Calendars:    93
+Relations:    82
+Errors:       0
+
+--- Reader Diagnostics ---
+  Fixed2Data: found, 7296 bytes, maxSize2=64
+
+--- Tasks ---
+  [  0] L0 My first project                         Start=1/06/2024  Dur=188 Days           Pred=
+  [222] L0 701 - Investigation                      Start=1/06/2024  Dur=188 Days           Pred=
+  [569] L0 Consideration                            Start=1/06/2024  Dur=20 Days            Pred=
+  [570] L0 Application Assessment                   Start=3/06/2024  Dur=13 Days            Pred=576(FinishToStart)
+  [571] L0 Delay due to New Info                    Start=15/06/2024  Dur=0 Days             Pred=570(FinishToStart)
+  [573] L0 Investigation                            Start=20/06/2024  Dur=100 Days           Pred=
+  [574] L0 Unallocated period 1                     Start=20/06/2024  Dur=0 Days             Pred=575(FinishToStart)
+  [575] L0 Initiation                               Start=20/06/2024  Dur=0 Days             Pred=598(FinishToStart)
+  [576] L0 Lead time from lodgement                 Start=1/06/2024  Dur=2 Days             Pred=585(FinishToStart)
+  [577] L0 Exporter Questionnaire                   Start=21/06/2024  Dur=37 Days            Pred=575(FinishToStart)
+  [578] L0 Verification - importer 1                Start=19/07/2024  Dur=21 Days            Pred=602(FinishToStart)
+  [579] L0 Verification - importer 2                Start=19/07/2024  Dur=21 Days            Pred=602(FinishToStart)
+  [580] L0 Verification - importer 3                Start=19/07/2024  Dur=21 Days            Pred=602(FinishToStart)
+  [581] L0 Verification - Industry                  Start=21/06/2024  Dur=35 Days            Pred=575(FinishToStart)
+  [582] L0 Verification - exporter 1                Start=28/07/2024  Dur=42 Days            Pred=577(FinishToStart)
+  [583] L0 Verification - exporter 2                Start=28/07/2024  Dur=42 Days            Pred=577(FinishToStart)
+  [584] L0 Verification - exporter 3                Start=28/07/2024  Dur=42 Days            Pred=577(FinishToStart)
+  [585] L0 Lodgement                                Start=1/06/2024  Dur=0 Days             Pred=
+  [590] L0 SEF                                      Start=28/09/2024  Dur=0 Days             Pred=604(FinishToStart)
+  [591] L0 Initial Submissions                      Start=21/06/2024  Dur=37 Days            Pred=575(FinishToStart)
+  [592] L0 Final Report                             Start=29/09/2024  Dur=38 Days            Pred=590(FinishToStart)
+  [593] L0 ICM                                      Start=20/10/2024  Dur=0 Days             Pred=638(FinishToStart)
+  [594] L0 CP                                       Start=21/10/2024  Dur=16 Days            Pred=593(FinishToStart)
+  [595] L0 Final report                             Start=5/11/2024  Dur=0 Days             Pred=594(FinishToStart)
+  [596] L0 SEF Submission                           Start=29/09/2024  Dur=20 Days            Pred=590(FinishToStart)
+  [597] L0 Minister's decision                      Start=6/11/2024  Dur=30 Days            Pred=595(FinishToStart)
+  [598] L0 Decision day                             Start=20/06/2024  Dur=0 Days             Pred=571(FinishToStart),600(FinishToStart),607(FinishToStart),619(FinishToStart)
+  [599] L0 ICM                                      Start=20/06/2024  Dur=0 Days             Pred=619(FinishToStart)
+  [600] L0 CP                                       Start=20/06/2024  Dur=0 Days             Pred=599(FinishToStart)
+  [602] L0 Importer Questionnaire                   Start=21/06/2024  Dur=28 Days            Pred=575(FinishToStart)
+  [603] L0 ICM                                      Start=12/09/2024  Dur=0 Days             Pred=635(FinishToStart)
+  [604] L0 CP                                       Start=13/09/2024  Dur=16 Days            Pred=603(FinishToStart)
+  [605] L0 Drafting SEF                             Start=8/09/2024  Dur=21 Days            Pred=574(FinishToStart),626(FinishToStart),608(FinishToStart),609(FinishToStart),610(FinishToStart)
+  [606] L0 Drafting Final                           Start=19/10/2024  Dur=18 Days            Pred=596(FinishToStart)
+  [607] L0 Further Delay                            Start=15/06/2024  Dur=0 Days             Pred=571(FinishToStart)
+  [608] L0 Verification - Industry                  Start=21/06/2024  Dur=35 Days            Pred=
+  [609] L0 Verification - Importer                  Start=21/06/2024  Dur=49 Days            Pred=
+  [610] L0 Verification - Exporter                  Start=21/06/2024  Dur=79 Days            Pred=
+  [611] L0 Admin Tasks                              Start=2/06/2024  Dur=0 Days             Pred=576(FinishToStart)
+  [614] L0 CRE data cleaning                        Start=3/06/2024  Dur=3 Days             Pred=611(FinishToStart)
+  [615] L0 Review A - AU Market and Imports         Start=6/06/2024  Dur=10 Days            Pred=614(FinishToStart)
+  [616] L0 Review B - Export & Dumping Margin       Start=6/06/2024  Dur=10 Days            Pred=614(FinishToStart)
+  [617] L0 Review C - Subsidy & Threat              Start=6/06/2024  Dur=10 Days            Pred=614(FinishToStart)
+  [618] L0 Questionnaires Preperation               Start=3/06/2024  Dur=5 Days             Pred=611(FinishToStart)
+  [619] L0 Consideration Report                     Start=16/06/2024  Dur=5 Days             Pred=570(FinishToStart)
+  [620] L0 New info on x                            Start=15/06/2024  Dur=0 Days             Pred=570(FinishToStart)
+  [621] L0 New info on Y                            Start=15/06/2024  Dur=0 Days             Pred=570(FinishToStart)
+  [622] L0 Initiation AND                           Start=16/06/2024  Dur=5 Days             Pred=607(FinishToStart)
+  [623] L0 Publish initiation AND                   Start=20/06/2024  Dur=0 Days             Pred=598(FinishToStart)
+  [624] L0 Email out Questionnaires                 Start=20/06/2024  Dur=0 Days             Pred=598(FinishToStart)
+  ... (51 more)
+
+--- Resources ---
+  [  2] Blueberry
+  [  3] Honeydew
+  [  6] Grape
+  [  7] Guava
+  [  8] Persimmon
+  [ 10] Papaya
+  [ 11] Mango
+  [ 14] Pineapple
+  [ 15] Lychee
+  [ 20] Cranberry
+  [ 23] Strawberry
+  [ 24] Passionfruit
+  [ 25] Blackberry
+  [ 26] Apple
+  [ 27] Quince
+  [ 28] Tangerine
+  [ 30] Banana
+  [ 31] Kiwi
+  [ 32] Dragonfruit
+  [ 34] Plum
+  ... (72 more)
+
+--- Assignments ---
+  Task=576  Resource=     Work=16 Hours
+  Task=585  Resource=     Work=
+  Task=590  Resource=  7  Work=
+  Task=593  Resource=     Work=
+  Task=594  Resource=     Work=128 Hours
+  Task=595  Resource=  7  Work=
+  Task=596  Resource= 30  Work=160 Hours
+  Task=597  Resource=     Work=240 Hours
+  Task=598  Resource=     Work=
+  Task=599  Resource=     Work=
+  Task=600  Resource=     Work=
+  Task=603  Resource=     Work=
+  Task=604  Resource=     Work=128 Hours
+  Task=607  Resource=     Work=
+  Task=615  Resource=  2  Work=80 Hours
+  Task=616  Resource= 58  Work=80 Hours
+  Task=617  Resource= 49  Work=80 Hours
+  Task=620  Resource=     Work=
+  Task=621  Resource=     Work=
+  Task=626  Resource= 44  Work=
+  ... (104 more)
+
+=== PASS ===

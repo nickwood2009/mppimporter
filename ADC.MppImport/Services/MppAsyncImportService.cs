@@ -11,35 +11,17 @@ using ADC.MppImport.MppReader.Model;
 
 namespace ADC.MppImport.Services
 {
-    /// <summary>
-    /// Async chunked MPP import service. Designed to run across multiple plugin executions,
-    /// each staying under the 2-minute Dataverse sandbox timeout.
-    ///
-    /// Phase 0 (InitializeJob): Parse MPP, build subtree batches, create job record.
-    ///          Runs inside the lightweight StartMppImportActivity workflow activity.
-    ///
-    /// Phases 1-5: Executed by MppImportJobPlugin (async, self-triggering).
-    ///   Phase 1 (CreatingTasks):   Submit one batch of PssCreate ops.
-    ///   Phase 2 (WaitingForTasks): Poll PSS operation set completion, advance batch or phase.
-    ///   Phase 3 (PollingGUIDs):    Query CRM for actual task GUIDs.
-    ///   Phase 4 (CreatingDeps):    Submit dependency PssCreate ops.
-    ///   Phase 5 (WaitingForDeps):  Poll dep operation set completion, mark Completed.
-    /// </summary>
     public class MppAsyncImportService
     {
         private readonly IOrganizationService _service;
         private readonly ITracingService _trace;
 
-        /// <summary>Max tasks per PSS operation set batch.</summary>
         private const int BATCH_LIMIT = 100;
 
-        /// <summary>Max dependencies per PSS operation set batch.</summary>
         private const int DEP_BATCH_LIMIT = 50;
 
-        /// <summary>Max tick retries when waiting for PSS completion.</summary>
         private const int MAX_WAIT_TICKS = 30;
 
-        /// <summary>D365 max outline level for user tasks.</summary>
         private const int MAX_DEPTH = 10;
 
         public MppAsyncImportService(IOrganizationService service, ITracingService trace)
@@ -48,12 +30,6 @@ namespace ADC.MppImport.Services
             _trace = trace;
         }
 
-        #region Phase 0: Initialize Job (called from workflow activity)
-
-        /// <summary>
-        /// Parses the MPP file, builds subtree batches, and creates the adc_mppimportjob record.
-        /// Returns the job record ID. This runs inside the workflow activity and must be fast.
-        /// </summary>
         public Guid InitializeJob(byte[] mppBytes, Guid projectId, Guid? caseTemplateId, DateTime? projectStartDate, Guid? caseId = null, Guid? initiatingUserId = null)
         {
             if (mppBytes == null || mppBytes.Length == 0)
@@ -61,7 +37,6 @@ namespace ADC.MppImport.Services
 
             _trace?.Trace("InitializeJob: parsing MPP ({0} bytes)...", mppBytes.Length);
 
-            // Parse MPP
             var reader = new MppFileReader();
             ProjectFile project = reader.Read(mppBytes);
             _trace?.Trace("Parsed: {0} tasks, {1} resources", project.Tasks.Count, project.Resources.Count);
@@ -69,25 +44,19 @@ namespace ADC.MppImport.Services
             if (project.Tasks.Count == 0)
                 throw new InvalidPluginExecutionException("No tasks found in MPP file.");
 
-            // Filter out project summary task (UniqueID 0)
             var sortedByOrder = project.Tasks
                 .Where(t => t.UniqueID.HasValue && t.UniqueID.Value != 0)
                 .ToList();
 
-            // Derive parent relationships from OutlineLevel
             DeriveParentRelationships(sortedByOrder);
 
-            // Compute depth from parent chain, cap at MAX_DEPTH
             var depthCache = ComputeAndCapDepths(sortedByOrder);
 
-            // Build summary task set
             var summaryTaskIds = BuildSummaryTaskSet(sortedByOrder);
             _trace?.Trace("Summary tasks: {0}, Total tasks: {1}", summaryTaskIds.Count, sortedByOrder.Count);
 
-            // Get or create project bucket
             EntityReference bucketRef = GetOrCreateDefaultBucket(projectId);
 
-            // Build task DTOs
             var payload = new ImportJobPayload();
             payload.BucketId = bucketRef.Id.ToString();
 
@@ -106,14 +75,12 @@ namespace ADC.MppImport.Services
                     IsSummary = summaryTaskIds.Contains(mppTask.UniqueID.Value)
                 };
 
-                // Pre-compute duration/effort so plugin doesn't need MPP reader
                 if (!dto.IsSummary && mppTask.Duration != null && mppTask.Duration.Value >= 0)
                     dto.DurationHours = ConvertToHours(mppTask.Duration);
 
                 if (!dto.IsSummary && mppTask.Work != null && mppTask.Work.Value > 0)
                     dto.EffortHours = ConvertToHours(mppTask.Work);
 
-                // Pre-generate GUID
                 Guid preGen = Guid.NewGuid();
                 dto.PreGenGuid = preGen.ToString();
                 payload.TaskIdMap[dto.UniqueID] = dto.PreGenGuid;
@@ -121,19 +88,15 @@ namespace ADC.MppImport.Services
                 payload.Tasks.Add(dto);
             }
 
-            // Build dependency DTOs
             payload.Dependencies = BuildDependencyDtos(project, summaryTaskIds);
             _trace?.Trace("Dependencies: {0}", payload.Dependencies.Count);
 
-            // Build subtree batches
             payload.Batches = BuildSubtreeBatches(payload.Tasks);
             _trace?.Trace("Batches: {0} (limit {1} per batch)", payload.Batches.Count, BATCH_LIMIT);
 
-            // Serialize payload
             string taskDataJson = SerializeJson(payload);
             _trace?.Trace("Payload JSON size: {0} chars", taskDataJson.Length);
 
-            // Create job record
             var job = new Entity(ImportJobFields.EntityName);
             job[ImportJobFields.Name] = string.Format("Import {0} tasks", sortedByOrder.Count);
             job[ImportJobFields.Project] = new EntityReference("msdyn_project", projectId);
@@ -159,7 +122,6 @@ namespace ADC.MppImport.Services
             Guid jobId = _service.Create(job);
             _trace?.Trace("Created job record: {0}", jobId);
 
-            // Send "import started" notification
             string projectName = GetProjectName(projectId);
             if (initiatingUserId.HasValue)
             {
@@ -170,7 +132,6 @@ namespace ADC.MppImport.Services
                     NotificationIconType.Info);
             }
 
-            // Set initial import status on adc_case
             if (caseId.HasValue)
             {
                 try
@@ -189,14 +150,6 @@ namespace ADC.MppImport.Services
             return jobId;
         }
 
-        #endregion
-
-        #region Plugin Entry Point: ProcessJob
-
-        /// <summary>
-        /// Main entry point called by the async plugin. Reads the job record,
-        /// determines current phase, executes one unit of work, and advances state.
-        /// </summary>
         public void ProcessJob(Guid jobId)
         {
             var job = _service.Retrieve(ImportJobFields.EntityName, jobId, new ColumnSet(true));
@@ -207,7 +160,6 @@ namespace ADC.MppImport.Services
             _trace?.Trace("ProcessJob {0}: status={1} ({2}), tick={3}",
                 jobId, status, ImportJobStatus.Label(status), tick);
 
-            // Don't process terminal states
             if (status == ImportJobStatus.Completed || status == ImportJobStatus.Failed)
             {
                 _trace?.Trace("Job in terminal state, skipping.");
@@ -264,20 +216,10 @@ namespace ADC.MppImport.Services
             }
         }
 
-        #endregion
-
-        #region Phase Processors
-
-        /// <summary>
-        /// Phase 0 → 1: Job just created. Verify project exists, set start date, advance to CreatingTasks.
-        /// Note: PSS does not auto-create root tasks for S2S app users, so we skip that check.
-        /// PSS will handle root task creation when the first operation set is executed.
-        /// </summary>
         private void ProcessQueued(Entity job)
         {
             Guid projectId = job.GetAttributeValue<EntityReference>(ImportJobFields.Project).Id;
 
-            // Verify project exists
             try
             {
                 _service.Retrieve("msdyn_project", projectId, new ColumnSet("msdyn_subject"));
@@ -289,11 +231,6 @@ namespace ADC.MppImport.Services
                 return;
             }
 
-            // Note: Project start date is NOT set here to avoid PSS dependency rejection
-            // when scheduling against past dates. The date comparison test uses offset-based
-            // comparison instead (MPP start vs D365 project start → expected shift for all tasks).
-
-            // Advance to CreatingTasks
             var update = new Entity(ImportJobFields.EntityName, job.Id);
             update[ImportJobFields.Status] = new OptionSetValue(ImportJobStatus.CreatingTasks);
             update[ImportJobFields.CurrentBatch] = 0;
@@ -302,13 +239,6 @@ namespace ADC.MppImport.Services
             _trace?.Trace("Advanced to CreatingTasks, batch 0");
         }
 
-        /// <summary>
-        /// Phase 1: Process ALL task batches within a single execution.
-        /// For each batch: submit PssCreate ops, wait inline for PSS completion, advance.
-        /// This avoids Dataverse "infinite loop" detection which kills async plugin chains
-        /// after ~10 depth levels. A timeout guard saves progress if approaching the
-        /// 2-minute sandbox limit, letting the next execution resume.
-        /// </summary>
         private void ProcessCreatingTasks(Entity job)
         {
             var payload = DeserializePayload(job);
@@ -333,13 +263,8 @@ namespace ADC.MppImport.Services
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-            // Loop through all remaining batches within this single execution
             while (batchIndex < payload.Batches.Count)
             {
-                // Timeout guard: if we've been running > 60s AND processed at least one
-                // batch, save progress and let next execution continue.
-                // Each batch takes ~20-30s (PSS submit + poll). At 60s we fit 2-3 batches
-                // safely within the sandbox limit, with margin for the next batch's polling.
                 if (stopwatch.ElapsedMilliseconds > 60000 && batchIndex > startBatch)
                 {
                     _trace?.Trace("Approaching timeout at {0}ms, saving progress at batch {1}/{2}",
@@ -357,7 +282,6 @@ namespace ADC.MppImport.Services
                 _trace?.Trace("Creating batch {0}/{1} ({2} tasks)",
                     batchIndex + 1, payload.Batches.Count, batch.TaskUniqueIDs.Count);
 
-                // --- Submit batch ---
                 string operationSetId = CreateOperationSet(projectId,
                     string.Format("MPP Import Batch {0}/{1}", batchIndex + 1, payload.Batches.Count));
 
@@ -385,7 +309,6 @@ namespace ADC.MppImport.Services
                 _trace?.Trace("Submitted {0} PssCreate ops, executing...", opsCreated);
                 ExecuteOperationSet(operationSetId);
 
-                // --- Wait for completion inline (up to ~90s) ---
                 int osStatus = -1;
                 for (int attempt = 0; attempt < 18; attempt++)
                 {
@@ -416,8 +339,6 @@ namespace ADC.MppImport.Services
                 _trace?.Trace("Batch done ({0} tasks created so far), elapsed {1}ms",
                     totalCreated, stopwatch.ElapsedMilliseconds);
 
-                // Save progress after each batch (non-triggering: only currentBatch + createdCount)
-                // Plugin filters on adc_status + adc_tick, so this won't fire a new execution.
                 var progressUpdate = new Entity(ImportJobFields.EntityName, job.Id);
                 progressUpdate[ImportJobFields.CurrentBatch] = batchIndex;
                 progressUpdate[ImportJobFields.CreatedCount] = totalCreated;
@@ -425,7 +346,6 @@ namespace ADC.MppImport.Services
                 _service.Update(progressUpdate);
             }
 
-            // All batches done — advance to PollingGUIDs
             _trace?.Trace("All {0} batches completed, advancing to PollingGUIDs", payload.Batches.Count);
             var finalUpdate = new Entity(ImportJobFields.EntityName, job.Id);
             finalUpdate[ImportJobFields.Status] = new OptionSetValue(ImportJobStatus.PollingGUIDs);
@@ -435,11 +355,6 @@ namespace ADC.MppImport.Services
             _service.Update(finalUpdate);
         }
 
-        /// <summary>
-        /// Phase 2: Poll for PSS operation set completion within this execution.
-        /// Uses Thread.Sleep loop instead of tick-based self-triggering (which Dataverse
-        /// may coalesce/throttle for rapid updates to the same record).
-        /// </summary>
         private void ProcessWaitingForTasks(Entity job)
         {
             string osId = job.GetAttributeValue<string>(ImportJobFields.OperationSetId);
@@ -450,29 +365,27 @@ namespace ADC.MppImport.Services
                 return;
             }
 
-            // Poll within this execution — up to ~90 seconds (18 * 5s)
             int osStatus = -1;
             for (int attempt = 0; attempt < 18; attempt++)
             {
                 osStatus = CheckOperationSetStatus(osId);
-                if (osStatus != -1) break; // completed or failed
+                if (osStatus != -1) break;
                 _trace?.Trace("OperationSet still processing, attempt {0}/18", attempt + 1);
                 System.Threading.Thread.Sleep(5000);
             }
 
-            if (osStatus == -1) // still processing after all attempts
+            if (osStatus == -1)
             {
                 FailJob(job.Id, string.Format("Operation set {0} did not complete after 90s.", osId));
                 return;
             }
 
-            if (osStatus == 0) // failed
+            if (osStatus == 0)
             {
                 FailJob(job.Id, string.Format("Operation set {0} failed.", osId));
                 return;
             }
 
-            // Completed — advance to next batch or PollingGUIDs
             int batchIndex = job.GetAttributeValue<int>(ImportJobFields.CurrentBatch);
             int totalBatches = job.GetAttributeValue<int>(ImportJobFields.TotalBatches);
 
@@ -497,15 +410,11 @@ namespace ADC.MppImport.Services
             }
         }
 
-        /// <summary>
-        /// Phase 3: Query CRM for actual task GUIDs, build actual ID map.
-        /// </summary>
         private void ProcessPollingGUIDs(Entity job)
         {
             Guid projectId = job.GetAttributeValue<EntityReference>(ImportJobFields.Project).Id;
             int expectedCount = job.GetAttributeValue<int>(ImportJobFields.TotalTasks);
 
-            // Poll within this execution — up to ~90 seconds (18 * 5s)
             List<Entity> crmTasks = null;
             for (int attempt = 0; attempt < 18; attempt++)
             {
@@ -522,7 +431,6 @@ namespace ADC.MppImport.Services
                     crmTasks.Count, expectedCount);
             }
 
-            // Build name -> GUID lookup
             var crmTasksByName = new Dictionary<string, List<Guid>>(StringComparer.OrdinalIgnoreCase);
             foreach (var crmTask in crmTasks)
             {
@@ -537,7 +445,6 @@ namespace ADC.MppImport.Services
                 ids.Add(crmTask.Id);
             }
 
-            // Map UniqueID -> actual CRM GUID
             var payload = DeserializePayload(job);
             payload.ActualIdMap = new Dictionary<int, string>();
 
@@ -556,25 +463,16 @@ namespace ADC.MppImport.Services
             }
             _trace?.Trace("Matched {0}/{1} tasks", payload.ActualIdMap.Count, payload.Tasks.Count);
 
-            // Persist updated payload with actual ID map
             string updatedJson = SerializeJson(payload);
 
             var update = new Entity(ImportJobFields.EntityName, job.Id);
             update[ImportJobFields.TaskDataJson] = updatedJson;
             update[ImportJobFields.Status] = new OptionSetValue(ImportJobStatus.CreatingDeps);
-            update[ImportJobFields.CurrentBatch] = 0; // reuse as dep batch index
+            update[ImportJobFields.CurrentBatch] = 0;
             update[ImportJobFields.Tick] = 0;
             _service.Update(update);
         }
 
-        /// <summary>
-        /// Phase 4: Create dependency operations using actual CRM GUIDs.
-        /// Uses batch-indexed fire-and-forget submission with timeout guard.
-        /// Deps are split into batches of DEP_BATCH_LIMIT, each executed in its own
-        /// operation set without polling. A timeout guard saves the dep batch index
-        /// (via CurrentBatch) and triggers continuation when approaching the sandbox limit.
-        /// Batch indices are stable across executions (built from payload, not D365 state).
-        /// </summary>
         private void ProcessCreatingDeps(Entity job)
         {
             var payload = DeserializePayload(job);
@@ -587,9 +485,6 @@ namespace ADC.MppImport.Services
                 return;
             }
 
-            // Build the FULL dep entity list from payload (stable across executions).
-            // We don't filter by existing deps here — batch indices must stay stable
-            // so the CurrentBatch resume index remains correct.
             var projectRef = new EntityReference("msdyn_project", projectId);
             var depEntities = new List<Entity>();
             int unmapped = 0;
@@ -620,7 +515,6 @@ namespace ADC.MppImport.Services
                 return;
             }
 
-            // Calculate total dep batches and resume index
             int totalDepBatches = (depEntities.Count + DEP_BATCH_LIMIT - 1) / DEP_BATCH_LIMIT;
             int depBatchStart = job.GetAttributeValue<int>(ImportJobFields.CurrentBatch);
             int startIndex = depBatchStart; // track for timeout guard
@@ -632,8 +526,6 @@ namespace ADC.MppImport.Services
 
             for (int batchIdx = depBatchStart; batchIdx < totalDepBatches; batchIdx++)
             {
-                // Timeout guard: save progress and trigger continuation.
-                // 80s allows ~9 dep batches at ~8s each, with margin before 120s sandbox limit.
                 if (stopwatch.ElapsedMilliseconds > 80000 && batchIdx > startIndex)
                 {
                     _trace?.Trace("Dep timeout at {0}ms, saving at dep batch {1}/{2}",
@@ -664,7 +556,6 @@ namespace ADC.MppImport.Services
                 }
                 catch (Exception ex)
                 {
-                    // Batch submission failed — retry individual deps
                     _trace?.Trace("Dep batch {0} submit failed ({1}), retrying individually...", batchIdx + 1, ex.Message);
                     foreach (var dep in batchDeps)
                     {
@@ -682,23 +573,15 @@ namespace ADC.MppImport.Services
                     }
                 }
 
-                // Save dep batch progress (non-triggering: only CurrentBatch)
                 var progressUpdate = new Entity(ImportJobFields.EntityName, job.Id);
                 progressUpdate[ImportJobFields.CurrentBatch] = batchIdx + 1;
                 _service.Update(progressUpdate);
             }
 
-            // All dep batches submitted — complete immediately.
-            // PSS processes fire-and-forget operation sets asynchronously.
-            // The test's 30s PSS finalization wait gives deps time to commit.
             _trace?.Trace("All {0} dep batches submitted. Completing job.", totalDepBatches);
             CompleteJob(job.Id, depEntities.Count, 0);
         }
 
-        /// <summary>
-        /// Submits a batch of dependency entities in a single operation set,
-        /// executes it, and waits for completion. Returns true if successful.
-        /// </summary>
         private bool TryExecuteDepBatch(List<Entity> deps, Guid projectId, int batchNum)
         {
             try
@@ -711,7 +594,6 @@ namespace ADC.MppImport.Services
 
                 ExecuteOperationSet(osId);
 
-                // Wait for completion (up to ~45s — PSS needs time for large dep batches)
                 for (int attempt = 0; attempt < 9; attempt++)
                 {
                     System.Threading.Thread.Sleep(5000);
@@ -730,11 +612,6 @@ namespace ADC.MppImport.Services
             }
         }
 
-        /// <summary>
-        /// Phase 5: Wait for dependency operation set completion, then mark Completed.
-        /// With batched dep submission, this phase is only reached if ProcessCreatingDeps
-        /// used the legacy single-batch path. Kept for backward compatibility.
-        /// </summary>
         private void ProcessWaitingForDeps(Entity job)
         {
             string osId = job.GetAttributeValue<string>(ImportJobFields.OperationSetId);
@@ -745,38 +622,29 @@ namespace ADC.MppImport.Services
                 return;
             }
 
-            // Poll within this execution — up to ~90 seconds (18 * 5s)
             int osStatus = -1;
             for (int attempt = 0; attempt < 18; attempt++)
             {
                 osStatus = CheckOperationSetStatus(osId);
                 if (osStatus != -1) break;
-                _trace?.Trace("Dep OperationSet still processing, attempt {0}/18", attempt + 1);
                 System.Threading.Thread.Sleep(5000);
             }
 
-            if (osStatus == -1) // still processing after all attempts
+            if (osStatus == -1)
             {
-                _trace?.Trace("WARNING: Dep operation set timed out, completing without deps.");
                 CompleteJob(job.Id, 0);
                 return;
             }
 
-            if (osStatus == 0) // failed
+            if (osStatus == 0)
             {
-                _trace?.Trace("WARNING: Dependency operation set failed, tasks are intact.");
                 CompleteJob(job.Id, 0);
                 return;
             }
 
-            // Success
             int depsCount = job.GetAttributeValue<int>(ImportJobFields.DepsCount);
             CompleteJob(job.Id, depsCount);
         }
-
-        #endregion
-
-        #region Job State Helpers
 
         private void BumpTick(Entity job)
         {
@@ -794,7 +662,6 @@ namespace ADC.MppImport.Services
             update[ImportJobFields.ErrorMessage] = errorMessage;
             _service.Update(update);
 
-            // Send failure notification to initiating user
             try
             {
                 var job = _service.Retrieve(ImportJobFields.EntityName, jobId,
@@ -811,7 +678,6 @@ namespace ADC.MppImport.Services
                         string.Format("Import failed for {0}: {1}", projectName, shortReason),
                         NotificationIconType.Failure);
 
-                    // Update case import status
                     UpdateCaseImportStatus(job, ImportJobStatus.Failed, shortReason);
                 }
             }
@@ -829,7 +695,6 @@ namespace ADC.MppImport.Services
             update[ImportJobFields.DepsCount] = depsCreated;
             _service.Update(update);
 
-            // Send completion notification to initiating user
             try
             {
                 var job = _service.Retrieve(ImportJobFields.EntityName, jobId,
@@ -844,7 +709,6 @@ namespace ADC.MppImport.Services
 
                     if (depsFailed > 0)
                     {
-                        // Warning: completed but some deps failed
                         SendNotification(
                             userRef.Id,
                             "MPP Import Complete (with warnings)",
@@ -852,7 +716,6 @@ namespace ADC.MppImport.Services
                                 projectName, totalTasks, depsCreated, depsFailed),
                             NotificationIconType.Warning);
 
-                        // Update case import status
                         UpdateCaseImportStatus(job, ImportJobStatus.Completed,
                             string.Format("{0} tasks, {1}/{2} deps ({3} failed)",
                                 totalTasks, depsCreated, depsCreated + depsFailed, depsFailed));
@@ -866,7 +729,6 @@ namespace ADC.MppImport.Services
                                 projectName, totalTasks, depsCreated),
                             NotificationIconType.Success);
 
-                        // Update case import status
                         UpdateCaseImportStatus(job, ImportJobStatus.Completed,
                             string.Format("{0} tasks, {1} dependencies", totalTasks, depsCreated));
                     }
@@ -878,15 +740,6 @@ namespace ADC.MppImport.Services
             }
         }
 
-        #endregion
-
-        #region Notification Helpers
-
-        /// <summary>
-        /// Sends a Dataverse in-app notification (toast/bell) to the specified user.
-        /// Creates an appnotification record directly. Fails silently if the
-        /// appnotification table is not available.
-        /// </summary>
         private void SendNotification(Guid recipientUserId, string title, string body, int iconType)
         {
             try
@@ -902,14 +755,10 @@ namespace ADC.MppImport.Services
             }
             catch (Exception ex)
             {
-                // Non-fatal: don't break the import if notifications fail
                 _trace?.Trace("SendNotification failed (non-fatal): {0}", ex.Message);
             }
         }
 
-        /// <summary>
-        /// Retrieves the project display name for use in notification messages.
-        /// </summary>
         private string GetProjectName(Guid projectId)
         {
             try
@@ -923,10 +772,6 @@ namespace ADC.MppImport.Services
             }
         }
 
-        /// <summary>
-        /// Writes a progress message (with elapsed runtime) to the adc_case record during import.
-        /// Called at each phase transition so the user can see live progress on the form.
-        /// </summary>
         private void UpdateCaseProgress(Entity job, string progressMessage)
         {
             try
@@ -934,7 +779,6 @@ namespace ADC.MppImport.Services
                 var caseRef = job.GetAttributeValue<EntityReference>(ImportJobFields.Case);
                 if (caseRef == null) return;
 
-                // Compute elapsed runtime from job creation
                 var createdOn = job.GetAttributeValue<DateTime?>("createdon");
                 string runtime = "";
                 if (createdOn.HasValue)
@@ -958,11 +802,6 @@ namespace ADC.MppImport.Services
             }
         }
 
-        /// <summary>
-        /// Writes import status and message back to the adc_case record (if one is linked).
-        /// Uses adc_importstatus (optionset) and adc_importmessage (string).
-        /// Status mapping: 0=Queued, 1=Processing, 2=Completed, 3=CompletedWithWarnings, 4=Failed
-        /// </summary>
         private void UpdateCaseImportStatus(Entity job, int jobStatus, string message)
         {
             try
@@ -970,12 +809,10 @@ namespace ADC.MppImport.Services
                 var caseRef = job.GetAttributeValue<EntityReference>(ImportJobFields.Case);
                 if (caseRef == null) return;
 
-                // Map import job status to case import status optionset
                 int caseImportStatus;
                 switch (jobStatus)
                 {
                     case ImportJobStatus.Completed:
-                        // Check if message indicates warnings (depsFailed > 0)
                         caseImportStatus = (message != null && message.Contains("failed")) ? 3 : 2;
                         break;
                     case ImportJobStatus.Failed:
@@ -986,7 +823,6 @@ namespace ADC.MppImport.Services
                         break;
                 }
 
-                // Append elapsed runtime
                 var createdOn = job.GetAttributeValue<DateTime?>("createdon");
                 string runtime = "";
                 if (createdOn.HasValue)
@@ -1011,10 +847,6 @@ namespace ADC.MppImport.Services
                 _trace?.Trace("UpdateCaseImportStatus failed (non-fatal): {0}", ex.Message);
             }
         }
-
-        #endregion
-
-        #region MPP Parsing Helpers (reused from MppProjectImportService)
 
         private void DeriveParentRelationships(List<Task> sortedByOrder)
         {
@@ -1104,7 +936,6 @@ namespace ADC.MppImport.Services
 
         private List<DependencyDto> BuildDependencyDtos(ProjectFile project, HashSet<int> summaryTaskIds)
         {
-            // Build parent → children map for resolving summary deps
             var childrenOf = new Dictionary<int, List<int>>();
             foreach (var t in project.Tasks)
             {
@@ -1122,7 +953,6 @@ namespace ADC.MppImport.Services
                 }
             }
 
-            // Collect raw deps (all, including summary)
             var rawDeps = new List<DependencyDto>();
             int summaryDeps = 0;
 
@@ -1152,20 +982,18 @@ namespace ADC.MppImport.Services
 
             if (summaryDeps == 0)
             {
-                // No summary deps — return as-is
                 return rawDeps;
             }
 
             _trace?.Trace("{0} raw deps include {1} involving summary tasks — transforming to leaf deps",
                 rawDeps.Count, summaryDeps);
 
-            // Build predecessor/successor maps from leaf-to-leaf deps for entry/exit analysis
-            var predecessorMap = new Dictionary<int, List<int>>();  // taskId → list of predecessor taskIds
-            var successorMap = new Dictionary<int, List<int>>();    // taskId → list of successor taskIds
+            var predecessorMap = new Dictionary<int, List<int>>();
+            var successorMap = new Dictionary<int, List<int>>();
             foreach (var dep in rawDeps)
             {
                 if (summaryTaskIds.Contains(dep.PredecessorUniqueID) || summaryTaskIds.Contains(dep.SuccessorUniqueID))
-                    continue; // only leaf-to-leaf deps for internal analysis
+                    continue;
                 List<int> list;
                 if (!predecessorMap.TryGetValue(dep.SuccessorUniqueID, out list))
                 {
@@ -1181,10 +1009,6 @@ namespace ADC.MppImport.Services
                 list.Add(dep.SuccessorUniqueID);
             }
 
-            // Transform: replace summary-task endpoints with leaf-task equivalents
-            // Use entry/exit leaf analysis to minimize cross-product explosion:
-            //   - Successor is summary: use entry leaves (no internal predecessors) — these are the scheduling start points
-            //   - Predecessor is summary: use exit leaves (no internal successors) — these are the scheduling end points
             var finalDeps = new List<DependencyDto>();
             var seen = new HashSet<string>();
             int transformed = 0;
@@ -1196,14 +1020,12 @@ namespace ADC.MppImport.Services
 
                 if (!predIsSummary && !succIsSummary)
                 {
-                    // Normal leaf-to-leaf dep — keep as-is
                     string key = dep.PredecessorUniqueID + "|" + dep.SuccessorUniqueID;
                     if (seen.Add(key))
                         finalDeps.Add(dep);
                     continue;
                 }
 
-                // Resolve summary endpoints to targeted leaf tasks
                 List<int> predIds = predIsSummary
                     ? GetExitLeaves(dep.PredecessorUniqueID, childrenOf, summaryTaskIds, successorMap)
                     : new List<int> { dep.PredecessorUniqueID };
@@ -1245,9 +1067,6 @@ namespace ADC.MppImport.Services
             return finalDeps;
         }
 
-        /// <summary>
-        /// Returns all descendant UniqueIDs (both summary and leaf) under the given summary task.
-        /// </summary>
         private HashSet<int> GetAllDescendants(int summaryId, Dictionary<int, List<int>> childrenOf)
         {
             var result = new HashSet<int>();
@@ -1269,11 +1088,6 @@ namespace ADC.MppImport.Services
             return result;
         }
 
-        /// <summary>
-        /// Returns leaf descendants that have NO predecessor from within the same summary subtree.
-        /// These are the "entry points" — tasks that would start at the summary's start date.
-        /// Falls back to all leaf descendants if analysis finds none.
-        /// </summary>
         private List<int> GetEntryLeaves(int summaryId, Dictionary<int, List<int>> childrenOf,
             HashSet<int> summaryTaskIds, Dictionary<int, List<int>> predecessorMap)
         {
@@ -1282,7 +1096,7 @@ namespace ADC.MppImport.Services
 
             foreach (var id in descendants)
             {
-                if (summaryTaskIds.Contains(id)) continue; // skip summaries
+                if (summaryTaskIds.Contains(id)) continue;
 
                 bool hasInternalPred = false;
                 List<int> preds;
@@ -1302,8 +1116,6 @@ namespace ADC.MppImport.Services
                     entries.Add(id);
             }
 
-            // Fallback: if no entry leaves found (all have internal preds — shouldn't happen
-            // unless there's a cycle), return all leaf descendants
             if (entries.Count == 0)
             {
                 foreach (var id in descendants)
@@ -1316,11 +1128,6 @@ namespace ADC.MppImport.Services
             return entries;
         }
 
-        /// <summary>
-        /// Returns leaf descendants that have NO successor within the same summary subtree.
-        /// These are the "exit points" — tasks that define when the summary finishes.
-        /// Falls back to all leaf descendants if analysis finds none.
-        /// </summary>
         private List<int> GetExitLeaves(int summaryId, Dictionary<int, List<int>> childrenOf,
             HashSet<int> summaryTaskIds, Dictionary<int, List<int>> successorMap)
         {
@@ -1361,18 +1168,8 @@ namespace ADC.MppImport.Services
             return exits;
         }
 
-        #endregion
-
-        #region Subtree Batching
-
-        /// <summary>
-        /// Groups tasks into batches where complete subtrees are never split.
-        /// Each Level 1 subtree (root + all descendants) stays together.
-        /// Subtrees are packed into batches using first-fit up to BATCH_LIMIT.
-        /// </summary>
         private List<TaskBatch> BuildSubtreeBatches(List<TaskDto> tasks)
         {
-            // Build parent -> children lookup
             var childrenOf = new Dictionary<int, List<int>>();
             var topLevelIds = new List<int>();
 
@@ -1390,7 +1187,6 @@ namespace ADC.MppImport.Services
                 }
             }
 
-            // Collect all descendants of each top-level task (complete subtree)
             var subtrees = new List<List<int>>();
             foreach (int rootId in topLevelIds)
             {
@@ -1399,7 +1195,6 @@ namespace ADC.MppImport.Services
                 subtrees.Add(subtree);
             }
 
-            // Pack subtrees into batches (first-fit bin packing)
             var batches = new List<TaskBatch>();
             var currentBatch = new TaskBatch { Index = 0 };
 
@@ -1430,10 +1225,6 @@ namespace ADC.MppImport.Services
             }
         }
 
-        #endregion
-
-        #region Entity Mapping
-
         private Entity MapDtoToEntity(TaskDto dto, EntityReference projectRef, EntityReference bucketRef)
         {
             var entity = new Entity("msdyn_projecttask");
@@ -1456,10 +1247,6 @@ namespace ADC.MppImport.Services
 
             return entity;
         }
-
-        #endregion
-
-        #region PSS API Helpers
 
         private string CreateOperationSet(Guid projectId, string description)
         {
@@ -1497,10 +1284,7 @@ namespace ADC.MppImport.Services
             return operationSetId;
         }
 
-        /// <summary>
-        /// Checks the operation set status. Returns:
-        ///  1 = completed, 0 = failed/cancelled, -1 = still processing
-        /// </summary>
+        // Returns: 1=completed, 0=failed, -1=processing
         private int CheckOperationSetStatus(string operationSetId)
         {
             Guid osId;
@@ -1522,11 +1306,8 @@ namespace ADC.MppImport.Services
                     }
                 }
 
-                // Completed
                 if (status == 192350001 || status == 1) return 1;
-                // Failed or Cancelled
                 if (status == 192350002 || status == 2 || status == 192350003 || status == 3) return 0;
-                // Still processing
                 return -1;
             }
             catch (Exception ex)
@@ -1546,10 +1327,6 @@ namespace ADC.MppImport.Services
                 if (status == 0) throw new InvalidPluginExecutionException("OperationSet failed: " + operationSetId);
             }
         }
-
-        #endregion
-
-        #region Dataverse Helpers
 
         private EntityReference GetOrCreateDefaultBucket(Guid projectId)
         {
@@ -1643,10 +1420,6 @@ namespace ADC.MppImport.Services
             return osv != null ? osv.Value : -1;
         }
 
-        #endregion
-
-        #region JSON Serialization
-
         private ImportJobPayload DeserializePayload(Entity job)
         {
             string json = job.GetAttributeValue<string>(ImportJobFields.TaskDataJson);
@@ -1679,10 +1452,6 @@ namespace ADC.MppImport.Services
                 return (T)serializer.ReadObject(ms);
             }
         }
-
-        #endregion
-
-        #region Mapping Helpers
 
         private static int MapRelationType(RelationType type)
         {
@@ -1720,6 +1489,5 @@ namespace ADC.MppImport.Services
             }
         }
 
-        #endregion
     }
 }

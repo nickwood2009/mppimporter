@@ -91,6 +91,7 @@
     <Compile Include="Services\MppProjectImportService.cs" />
     <Compile Include="Services\MppImportJobData.cs" />
     <Compile Include="Services\MppAsyncImportService.cs" />
+    <Compile Include="Plugins\CaseCreatePlugin.cs" />
     <Compile Include="Plugins\MppImportJobPlugin.cs" />
     <Compile Include="Workflows\ImportMppToProjectActivity.cs" />
     <Compile Include="Workflows\StartMppImportActivity.cs" />

@@ -6,14 +6,6 @@ using ADC.MppImport.Services;
 
 namespace ADC.MppImport.Workflows
 {
-    /// <summary>
-    /// CRM Workflow Activity: Lightweight entry point for async chunked MPP import.
-    /// Parses the MPP file, serializes task data, and creates an adc_mppimportjob record.
-    /// The actual import is processed by MppImportJobPlugin in async phases.
-    ///
-    /// This replaces ImportMppToProjectActivity for large projects (100+ tasks).
-    /// The original ImportMppToProjectActivity is preserved for backward compatibility.
-    /// </summary>
     public class StartMppImportActivity : BaseCodeActivity
     {
         [Input("Case Template")]
@@ -56,7 +48,6 @@ namespace ADC.MppImport.Workflows
 
             DateTime? projectStartDate = (startsOn != default(DateTime)) ? (DateTime?)startsOn : null;
 
-            // Determine the initiating user (the user who triggered the workflow)
             Guid? caseId = caseRef?.Id;
             Guid? initiatingUserId = null;
             if (caseRef != null)
@@ -74,7 +65,6 @@ namespace ADC.MppImport.Workflows
                     TracingService.Trace("Could not resolve initiating user from case: {0}", ex.Message);
                 }
             }
-            // Fallback: use the workflow execution context initiating user
             if (!initiatingUserId.HasValue)
             {
                 var context = executionContext.GetExtension<IWorkflowContext>();
@@ -82,14 +72,10 @@ namespace ADC.MppImport.Workflows
                     initiatingUserId = context.InitiatingUserId;
             }
 
-            // Download MPP file from case template
             byte[] mppBytes = DownloadFileColumn(templateRef.Id, "adc_adccasetemplate", "adc_templatefile");
             if (mppBytes == null || mppBytes.Length == 0)
                 throw new InvalidPluginExecutionException("No MPP file found on the case template record.");
 
-            TracingService.Trace("MPP file: {0} bytes", mppBytes.Length);
-
-            // Initialize the async import job
             var importService = new MppAsyncImportService(OrganizationService, TracingService);
             Guid jobId = importService.InitializeJob(mppBytes, projectRef.Id, templateRef.Id, projectStartDate, caseId, initiatingUserId);
 
@@ -98,9 +84,6 @@ namespace ADC.MppImport.Workflows
             TracingService.Trace("StartMppImport: Job {0} created, import will proceed asynchronously.", jobId);
         }
 
-        /// <summary>
-        /// Downloads a file column's content as byte[] using InitializeFileBlocksDownload.
-        /// </summary>
         private byte[] DownloadFileColumn(Guid recordId, string entityName, string fileAttributeName)
         {
             try

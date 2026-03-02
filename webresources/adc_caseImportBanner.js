@@ -44,11 +44,20 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
         // Show initial banner
         updateBanner(formContext);
 
-        // Start polling if import is in progress
         var statusAttr = formContext.getAttribute("adc_importstatus");
-        if (statusAttr) {
-            var status = statusAttr.getValue();
-            if (status === STATUS.QUEUED || status === STATUS.PROCESSING) {
+        var status = statusAttr ? statusAttr.getValue() : null;
+
+        if (status === STATUS.QUEUED || status === STATUS.PROCESSING) {
+            // Import already in progress — poll immediately
+            startPolling(formContext);
+        } else if (status === null || status === undefined) {
+            // Status not set yet — check if a case template is selected,
+            // meaning the async plugin will kick off shortly
+            var templateAttr = formContext.getAttribute("adc_adccasetemplateid");
+            var hasTemplate = templateAttr && templateAttr.getValue() && templateAttr.getValue().length > 0;
+            if (hasTemplate) {
+                formContext.ui.setFormNotification(
+                    "MPP import starting — please wait...", "INFO", NOTIFICATION_ID);
                 startPolling(formContext);
             }
         }
@@ -108,17 +117,21 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
         _intervalId = setInterval(function () {
             try {
                 // Refresh the form data to pick up server-side changes
-                Xrm.Page.data.refresh(false).then(
+                formContext.data.refresh(false).then(
                     function () {
                         updateBanner(formContext);
 
-                        // Stop polling if import is no longer in progress
+                        // Stop polling only when import reaches a terminal state
                         var statusAttr = formContext.getAttribute("adc_importstatus");
                         if (statusAttr) {
                             var status = statusAttr.getValue();
-                            if (status !== STATUS.QUEUED && status !== STATUS.PROCESSING) {
+                            if (status === STATUS.COMPLETED ||
+                                status === STATUS.COMPLETED_WARNINGS ||
+                                status === STATUS.FAILED) {
                                 stopPolling();
                             }
+                            // Keep polling if null (waiting for async plugin),
+                            // QUEUED, or PROCESSING
                         }
                     },
                     function () {

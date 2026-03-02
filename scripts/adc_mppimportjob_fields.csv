@@ -1,0 +1,19 @@
+Action,Entity,SchemaName,DisplayName,AttributeType,Description,MaxLength,MinValue,MaxValue,RequiredLevel,PicklistOptions,LookupTarget,LookupRelationshipName
+Create,adc_mppimportjob,adc_status,Status,Picklist,Import job status,,,,None,"0:Queued;1:Creating Tasks;2:Waiting for Tasks;3:Polling GUIDs;4:Creating Dependencies;5:Waiting for Dependencies;6:Completed;7:Failed",,
+Create,adc_mppimportjob,adc_phase,Phase,Integer,Current processing phase,,-1,2147483647,None,,,,
+Create,adc_mppimportjob,adc_currentbatch,Current Batch,Integer,Index of batch being processed,,-1,2147483647,None,,,,
+Create,adc_mppimportjob,adc_totalbatches,Total Batches,Integer,Total number of task batches,,-1,2147483647,None,,,,
+Create,adc_mppimportjob,adc_totaltasks,Total Tasks,Integer,Total tasks to import,,-1,2147483647,None,,,,
+Create,adc_mppimportjob,adc_createdcount,Created Count,Integer,Tasks created so far,,-1,2147483647,None,,,,
+Create,adc_mppimportjob,adc_depscount,Dependencies Count,Integer,Dependencies created so far,,-1,2147483647,None,,,,
+Create,adc_mppimportjob,adc_tick,Tick,Integer,Self-trigger counter,,-1,2147483647,None,,,,
+Create,adc_mppimportjob,adc_taskdatajson,Task Data (JSON),Memo,Serialized task and dependency payload,1048576,,,None,,,,
+Create,adc_mppimportjob,adc_taskidmapjson,Task ID Map (JSON),Memo,Maps UniqueID to CRM GUID after creation,1048576,,,None,,,,
+Create,adc_mppimportjob,adc_batchesjson,Batches (JSON),Memo,Serialized batch definitions,1048576,,,None,,,,
+Create,adc_mppimportjob,adc_operationsetid,Operation Set ID,String,Current PSS operation set ID,100,,,None,,,,
+Create,adc_mppimportjob,adc_projectstartdate,Project Start Date,DateTime,Override project start date,,,,None,,,,
+Create,adc_mppimportjob,adc_errormessage,Error Message,Memo,Error details if job failed,1048576,,,None,,,,
+Create,adc_mppimportjob,adc_project,Project,Lookup,Target project for import,,,,None,,msdyn_project,adc_mppimportjob_project
+Create,adc_mppimportjob,adc_casetemplate,Case Template,Lookup,Source case template,,,,None,,adc_adccasetemplate,adc_mppimportjob_casetemplate
+Create,adc_mppimportjob,adc_case,Case,Lookup,Originating case record,,,,None,,adc_case,adc_mppimportjob_case
+Create,adc_mppimportjob,adc_initiatinguser,Initiating User,Lookup,User who triggered the import,,,,None,,systemuser,adc_mppimportjob_initiatinguser

@@ -89,7 +89,7 @@ namespace ADC.MppImport.Plugins
 
             try
             {
-                var templateRef = target.GetAttributeValue<EntityReference>("adc_casetemplate");
+                var templateRef = target.GetAttributeValue<EntityReference>("adc_adccasetemplateid");
                 if (templateRef == null)
                 {
                     trace.Trace("No case template selected, nothing to import.");
@@ -128,7 +128,7 @@ namespace ADC.MppImport.Plugins
                 trace.Trace("Project created: {0}", projectId);
 
                 var caseUpdate = new Entity("adc_case", caseId);
-                caseUpdate["adc_project"] = new EntityReference("msdyn_project", projectId);
+                caseUpdate["adc_projectid"] = new EntityReference("msdyn_project", projectId);
                 caseUpdate["adc_importstatus"] = new OptionSetValue(1); // Processing
                 caseUpdate["adc_importmessage"] = "Creating project and starting import...";
                 service.Update(caseUpdate);

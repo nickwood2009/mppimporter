@@ -44,9 +44,20 @@ namespace ADC.MppImport.Plugins
 
             try
             {
-                var templateRef = target.GetAttributeValue<EntityReference>("adc_casetemplate");
-                tracingService.Trace("CaseCreatePlugin: adc_casetemplate = {0}",
+                var templateRef = target.GetAttributeValue<EntityReference>("adc_adccasetemplateid");
+                tracingService.Trace("CaseCreatePlugin: adc_casetemplate from Target = {0}",
                     templateRef != null ? templateRef.Id.ToString() : "NULL");
+
+                if (templateRef == null)
+                {
+                    tracingService.Trace("CaseCreatePlugin: Not in Target, retrieving from DB...");
+                    var fullRecord = service.Retrieve("adc_case", caseId,
+                        new ColumnSet("adc_adccasetemplateid"));
+                    templateRef = fullRecord.GetAttributeValue<EntityReference>("adc_adccasetemplateid");
+                    tracingService.Trace("CaseCreatePlugin: adc_casetemplate from DB = {0}",
+                        templateRef != null ? templateRef.Id.ToString() : "NULL");
+                }
+
                 if (templateRef == null)
                 {
                     tracingService.Trace("CaseCreatePlugin: No template set, exiting.");
@@ -82,7 +93,7 @@ namespace ADC.MppImport.Plugins
                 tracingService.Trace("CaseCreatePlugin: Project created: {0}", projectId);
 
                 var caseUpdate = new Entity("adc_case", caseId);
-                caseUpdate["adc_project"] = new EntityReference("msdyn_project", projectId);
+                caseUpdate["adc_projectid"] = new EntityReference("msdyn_project", projectId);
                 caseUpdate["adc_importstatus"] = new OptionSetValue(1); // Processing
                 caseUpdate["adc_importmessage"] = "Creating project and starting import...";
                 service.Update(caseUpdate);

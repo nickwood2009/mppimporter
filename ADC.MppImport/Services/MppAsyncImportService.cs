@@ -796,21 +796,10 @@ namespace ADC.MppImport.Services
                 var caseRef = job.GetAttributeValue<EntityReference>(ImportJobFields.Case);
                 if (caseRef == null) return;
 
-                var createdOn = job.GetAttributeValue<DateTime?>("createdon");
-                string runtime = "";
-                if (createdOn.HasValue)
-                {
-                    var elapsed = DateTime.UtcNow - createdOn.Value.ToUniversalTime();
-                    if (elapsed.TotalMinutes >= 1)
-                        runtime = string.Format(" [{0}m {1}s]", (int)elapsed.TotalMinutes, elapsed.Seconds);
-                    else
-                        runtime = string.Format(" [{0}s]", (int)elapsed.TotalSeconds);
-                }
-
                 var caseUpdate = new Entity("adc_case", caseRef.Id);
                 caseUpdate["adc_importstatus"] = new OptionSetValue(1); // Processing
-                caseUpdate["adc_importmessage"] = (progressMessage + runtime).Length > 250
-                    ? (progressMessage + runtime).Substring(0, 250) : (progressMessage + runtime);
+                caseUpdate["adc_importmessage"] = progressMessage.Length > 250
+                    ? progressMessage.Substring(0, 250) : progressMessage;
                 _service.Update(caseUpdate);
             }
             catch (Exception ex)

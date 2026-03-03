@@ -26,8 +26,7 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
     var POLL_INTERVAL_MS = 15000; // 15 seconds
     var _intervalId = null;
     var _tickerId = null;
-    var _lastMessage = "";
-    var _elapsedSeconds = 0;
+    var _startTime = null;
 
     // Status constants matching adc_importstatus optionset
     var STATUS = {
@@ -87,13 +86,12 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
             var text = "MPP import in progress";
             if (msg) text += " — " + msg;
 
-            // Reset timer when server message changes
-            if (msg !== _lastMessage) {
-                _lastMessage = msg;
-                _elapsedSeconds = 0;
+            if (!_startTime) {
+                _startTime = new Date();
             }
 
-            var display = text + " (" + formatElapsed(_elapsedSeconds) + ")";
+            var elapsed = Math.floor((new Date() - _startTime) / 1000);
+            var display = text + " (" + formatElapsed(elapsed) + ")";
             formContext.ui.setFormNotification(display, "INFO", NOTIFICATION_ID);
             startTicker(formContext);
         } else if (status === STATUS.FAILED) {
@@ -167,16 +165,16 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
         if (_tickerId) return; // already ticking
 
         _tickerId = setInterval(function () {
-            _elapsedSeconds++;
             var statusAttr = formContext.getAttribute("adc_importstatus");
             var msgAttr = formContext.getAttribute("adc_importmessage");
             var status = statusAttr ? statusAttr.getValue() : null;
 
-            if (status === STATUS.QUEUED || status === STATUS.PROCESSING) {
+            if (status === STATUS.QUEUED || status === STATUS.PROCESSING || status === null) {
                 var msg = msgAttr ? (msgAttr.getValue() || "") : "";
-                var text = "MPP import in progress";
+                var text = (status === null) ? "MPP import starting" : "MPP import in progress";
                 if (msg) text += " — " + msg;
-                var display = text + " (" + formatElapsed(_elapsedSeconds) + ")";
+                var elapsed = _startTime ? Math.floor((new Date() - _startTime) / 1000) : 0;
+                var display = text + " (" + formatElapsed(elapsed) + ")";
                 formContext.ui.setFormNotification(display, "INFO", NOTIFICATION_ID);
             }
         }, 1000);
@@ -190,8 +188,7 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
             clearInterval(_tickerId);
             _tickerId = null;
         }
-        _elapsedSeconds = 0;
-        _lastMessage = "";
+        _startTime = null;
     }
 
     /**

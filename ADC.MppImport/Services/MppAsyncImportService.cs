@@ -129,7 +129,8 @@ namespace ADC.MppImport.Services
                     initiatingUserId.Value,
                     "MPP Import Started",
                     string.Format("Import started for {0} ({1} tasks) \u2014 running in background.", projectName, sortedByOrder.Count),
-                    NotificationIconType.Info);
+                    NotificationIconType.Info,
+                    caseId);
             }
 
             if (caseId.HasValue)
@@ -672,11 +673,14 @@ namespace ADC.MppImport.Services
                 {
                     string projectName = GetProjectName(projectRef.Id);
                     string shortReason = errorMessage.Length > 120 ? errorMessage.Substring(0, 120) + "..." : errorMessage;
+                    var caseRef = job.GetAttributeValue<EntityReference>(ImportJobFields.Case);
+                    Guid? caseIdForNotif = caseRef != null ? caseRef.Id : (Guid?)null;
                     SendNotification(
                         userRef.Id,
                         "MPP Import Failed",
                         string.Format("Import failed for {0}: {1}", projectName, shortReason),
-                        NotificationIconType.Failure);
+                        NotificationIconType.Failure,
+                        caseIdForNotif);
 
                     UpdateCaseImportStatus(job, ImportJobStatus.Failed, shortReason);
                 }
@@ -706,6 +710,8 @@ namespace ADC.MppImport.Services
                 {
                     string projectName = GetProjectName(projectRef.Id);
                     int totalTasks = job.GetAttributeValue<int>(ImportJobFields.TotalTasks);
+                    var caseRef = job.GetAttributeValue<EntityReference>(ImportJobFields.Case);
+                    Guid? caseIdForNotif = caseRef != null ? caseRef.Id : (Guid?)null;
 
                     if (depsFailed > 0)
                     {
@@ -714,7 +720,8 @@ namespace ADC.MppImport.Services
                             "MPP Import Complete (with warnings)",
                             string.Format("{0}: {1} tasks, {2} deps OK, {3} deps failed.",
                                 projectName, totalTasks, depsCreated, depsFailed),
-                            NotificationIconType.Warning);
+                            NotificationIconType.Warning,
+                            caseIdForNotif);
 
                         UpdateCaseImportStatus(job, ImportJobStatus.Completed,
                             string.Format("{0} tasks, {1}/{2} deps ({3} failed)",
@@ -727,7 +734,8 @@ namespace ADC.MppImport.Services
                             "MPP Import Complete",
                             string.Format("{0}: {1} tasks, {2} dependencies.",
                                 projectName, totalTasks, depsCreated),
-                            NotificationIconType.Success);
+                            NotificationIconType.Success,
+                            caseIdForNotif);
 
                         UpdateCaseImportStatus(job, ImportJobStatus.Completed,
                             string.Format("{0} tasks, {1} dependencies", totalTasks, depsCreated));
@@ -740,7 +748,8 @@ namespace ADC.MppImport.Services
             }
         }
 
-        private void SendNotification(Guid recipientUserId, string title, string body, int iconType)
+        private void SendNotification(Guid recipientUserId, string title, string body, int iconType,
+            Guid? caseId = null)
         {
             try
             {
@@ -750,6 +759,14 @@ namespace ADC.MppImport.Services
                 notification["ownerid"] = new EntityReference("systemuser", recipientUserId);
                 notification["icontype"] = new OptionSetValue(iconType);
                 notification["toasttype"] = new OptionSetValue(200000000); // Timed (shows toast)
+
+                if (caseId.HasValue)
+                {
+                    notification["data"] = string.Format(
+                        "{{\"actions\":[{{\"title\":\"Open Case\",\"data\":{{\"url\":\"?pagetype=entityrecord&etn=adc_case&id={0}\",\"navigationTarget\":\"dialog\"}}}}]}}",
+                        caseId.Value);
+                }
+
                 _service.Create(notification);
                 _trace?.Trace("Notification sent to {0}: {1}", recipientUserId, title);
             }

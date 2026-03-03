@@ -25,6 +25,9 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
     var NOTIFICATION_ID = "mpp_import";
     var POLL_INTERVAL_MS = 15000; // 15 seconds
     var _intervalId = null;
+    var _tickerId = null;
+    var _lastMessage = "";
+    var _elapsedSeconds = 0;
 
     // Status constants matching adc_importstatus optionset
     var STATUS = {
@@ -83,26 +86,37 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
         if (status === STATUS.QUEUED || status === STATUS.PROCESSING) {
             var text = "MPP import in progress";
             if (msg) text += " — " + msg;
-            formContext.ui.setFormNotification(text, "INFO", NOTIFICATION_ID);
+
+            // Reset timer when server message changes
+            if (msg !== _lastMessage) {
+                _lastMessage = msg;
+                _elapsedSeconds = 0;
+            }
+
+            var display = text + " (" + formatElapsed(_elapsedSeconds) + ")";
+            formContext.ui.setFormNotification(display, "INFO", NOTIFICATION_ID);
+            startTicker(formContext);
         } else if (status === STATUS.FAILED) {
+            stopTicker();
             var textErr = "MPP import failed";
             if (msg) textErr += " — " + msg;
             formContext.ui.setFormNotification(textErr, "ERROR", NOTIFICATION_ID);
         } else if (status === STATUS.COMPLETED_WARNINGS) {
+            stopTicker();
             var textWarn = "MPP import completed with warnings";
             if (msg) textWarn += " — " + msg;
             formContext.ui.setFormNotification(textWarn, "WARNING", NOTIFICATION_ID);
         } else if (status === STATUS.COMPLETED) {
-            // Show success briefly then clear
+            stopTicker();
             var textOk = "MPP import completed";
             if (msg) textOk += " — " + msg;
             formContext.ui.setFormNotification(textOk, "INFO", NOTIFICATION_ID);
             setTimeout(function () {
                 formContext.ui.clearFormNotification(NOTIFICATION_ID);
             }, 10000);
-            // Stop polling — import is done
             stopPolling();
         } else {
+            stopTicker();
             formContext.ui.clearFormNotification(NOTIFICATION_ID);
             stopPolling();
         }
@@ -146,6 +160,53 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
     }
 
     /**
+     * Starts a 1-second ticker that increments the elapsed counter
+     * and updates the banner text so it looks live.
+     */
+    function startTicker(formContext) {
+        if (_tickerId) return; // already ticking
+
+        _tickerId = setInterval(function () {
+            _elapsedSeconds++;
+            var statusAttr = formContext.getAttribute("adc_importstatus");
+            var msgAttr = formContext.getAttribute("adc_importmessage");
+            var status = statusAttr ? statusAttr.getValue() : null;
+
+            if (status === STATUS.QUEUED || status === STATUS.PROCESSING) {
+                var msg = msgAttr ? (msgAttr.getValue() || "") : "";
+                var text = "MPP import in progress";
+                if (msg) text += " — " + msg;
+                var display = text + " (" + formatElapsed(_elapsedSeconds) + ")";
+                formContext.ui.setFormNotification(display, "INFO", NOTIFICATION_ID);
+            }
+        }, 1000);
+    }
+
+    /**
+     * Stops the 1-second ticker.
+     */
+    function stopTicker() {
+        if (_tickerId) {
+            clearInterval(_tickerId);
+            _tickerId = null;
+        }
+        _elapsedSeconds = 0;
+        _lastMessage = "";
+    }
+
+    /**
+     * Formats seconds into a human-readable elapsed string (e.g. "1m 23s").
+     */
+    function formatElapsed(totalSeconds) {
+        var mins = Math.floor(totalSeconds / 60);
+        var secs = totalSeconds % 60;
+        if (mins > 0) {
+            return mins + "m " + secs + "s";
+        }
+        return secs + "s";
+    }
+
+    /**
      * Stops the polling interval.
      */
     function stopPolling() {
@@ -153,6 +214,7 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
             clearInterval(_intervalId);
             _intervalId = null;
         }
+        stopTicker();
     }
 
 })();

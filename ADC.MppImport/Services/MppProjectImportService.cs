@@ -90,10 +90,8 @@ namespace ADC.MppImport.Services
 
             // 6. Derive parent from OutlineLevel for tasks where ParentTask was not set by the MPP reader.
             //    Must run before task entity creation so HasChildTasks is correct for summary detection.
-            // Filter out the MPP project summary task (UniqueID 0, outline level 0) — it represents the
-            // project itself, not a real task. PSS already creates its own root task for the project.
             var sortedByOrder = project.Tasks
-                .Where(t => t.UniqueID.HasValue && t.UniqueID.Value != 0)
+                .Where(t => t.UniqueID.HasValue)
                 .ToList(); // preserve MPP file order (= outline order)
 
             // Dump reader diagnostics
@@ -140,7 +138,7 @@ namespace ADC.MppImport.Services
                 if (!mppTask.UniqueID.HasValue) continue;
                 int depth = 1;
                 var p = mppTask.ParentTask;
-                while (p != null && p.UniqueID.HasValue && p.UniqueID.Value != 0)
+                while (p != null && p.UniqueID.HasValue)
                 {
                     depth++;
                     p = p.ParentTask;
@@ -204,8 +202,7 @@ namespace ADC.MppImport.Services
             var summaryTaskIds = new HashSet<int>();
             foreach (var mppTask in sortedByOrder)
             {
-                if (mppTask.ParentTask != null && mppTask.ParentTask.UniqueID.HasValue
-                    && mppTask.ParentTask.UniqueID.Value != 0)
+                if (mppTask.ParentTask != null && mppTask.ParentTask.UniqueID.HasValue)
                     summaryTaskIds.Add(mppTask.ParentTask.UniqueID.Value);
             }
             _trace?.Trace("Summary tasks (from parent refs): {0}", summaryTaskIds.Count);

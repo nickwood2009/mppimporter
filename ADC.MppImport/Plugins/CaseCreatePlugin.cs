@@ -115,8 +115,8 @@ namespace ADC.MppImport.Plugins
                 {
                     var failUpdate = new Entity("adc_case", caseId);
                     failUpdate["adc_importstatus"] = new OptionSetValue(4); // Failed
-                    failUpdate["adc_importmessage"] = "Import setup failed: " +
-                        (ex.Message.Length > 200 ? ex.Message.Substring(0, 200) + "..." : ex.Message);
+                    var errMsg = "Import setup failed: " + ex.Message;
+                    failUpdate["adc_importmessage"] = errMsg.Length > 100 ? errMsg.Substring(0, 97) + "..." : errMsg;
                     service.Update(failUpdate);
                 }
                 catch (Exception updateEx)

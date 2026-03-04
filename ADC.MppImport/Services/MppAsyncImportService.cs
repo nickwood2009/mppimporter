@@ -45,7 +45,7 @@ namespace ADC.MppImport.Services
                 throw new InvalidPluginExecutionException("No tasks found in MPP file.");
 
             var sortedByOrder = project.Tasks
-                .Where(t => t.UniqueID.HasValue && t.UniqueID.Value != 0)
+                .Where(t => t.UniqueID.HasValue)
                 .ToList();
 
             DeriveParentRelationships(sortedByOrder);
@@ -68,8 +68,7 @@ namespace ADC.MppImport.Services
                 {
                     UniqueID = mppTask.UniqueID.Value,
                     Name = mppTask.Name ?? "(Unnamed Task)",
-                    ParentUniqueID = (mppTask.ParentTask != null && mppTask.ParentTask.UniqueID.HasValue
-                        && mppTask.ParentTask.UniqueID.Value != 0)
+                    ParentUniqueID = (mppTask.ParentTask != null && mppTask.ParentTask.UniqueID.HasValue)
                         ? (int?)mppTask.ParentTask.UniqueID.Value : null,
                     Depth = depthCache.ContainsKey(mppTask.UniqueID.Value) ? depthCache[mppTask.UniqueID.Value] : 1,
                     IsSummary = summaryTaskIds.Contains(mppTask.UniqueID.Value)
@@ -798,8 +797,8 @@ namespace ADC.MppImport.Services
 
                 var caseUpdate = new Entity("adc_case", caseRef.Id);
                 caseUpdate["adc_importstatus"] = new OptionSetValue(1); // Processing
-                caseUpdate["adc_importmessage"] = progressMessage.Length > 250
-                    ? progressMessage.Substring(0, 250) : progressMessage;
+                caseUpdate["adc_importmessage"] = progressMessage.Length > 100
+                    ? progressMessage.Substring(0, 97) + "..." : progressMessage;
                 _service.Update(caseUpdate);
             }
             catch (Exception ex)
@@ -843,8 +842,8 @@ namespace ADC.MppImport.Services
                 string fullMessage = (message ?? "") + runtime;
                 var caseUpdate = new Entity("adc_case", caseRef.Id);
                 caseUpdate["adc_importstatus"] = new OptionSetValue(caseImportStatus);
-                caseUpdate["adc_importmessage"] = fullMessage.Length > 250
-                    ? fullMessage.Substring(0, 250) : fullMessage;
+                caseUpdate["adc_importmessage"] = fullMessage.Length > 100
+                    ? fullMessage.Substring(0, 97) + "..." : fullMessage;
                 _service.Update(caseUpdate);
                 _trace?.Trace("Updated case {0} import status: {1}", caseRef.Id, caseImportStatus);
             }
@@ -889,7 +888,7 @@ namespace ADC.MppImport.Services
                 if (!mppTask.UniqueID.HasValue) continue;
                 int depth = 1;
                 var p = mppTask.ParentTask;
-                while (p != null && p.UniqueID.HasValue && p.UniqueID.Value != 0)
+                while (p != null && p.UniqueID.HasValue)
                 {
                     depth++;
                     p = p.ParentTask;
@@ -933,8 +932,7 @@ namespace ADC.MppImport.Services
             var summaryTaskIds = new HashSet<int>();
             foreach (var mppTask in sortedByOrder)
             {
-                if (mppTask.ParentTask != null && mppTask.ParentTask.UniqueID.HasValue
-                    && mppTask.ParentTask.UniqueID.Value != 0)
+                if (mppTask.ParentTask != null && mppTask.ParentTask.UniqueID.HasValue)
                     summaryTaskIds.Add(mppTask.ParentTask.UniqueID.Value);
             }
             return summaryTaskIds;

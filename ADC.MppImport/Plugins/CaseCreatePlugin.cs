@@ -76,8 +76,19 @@ namespace ADC.MppImport.Plugins
                 }
 
                 var caseRecord = service.Retrieve("adc_case", caseId,
-                    new ColumnSet("adc_name", "createdby"));
+                    new ColumnSet("adc_name", "createdby", "adc_originallodgementdate"));
                 string caseName = caseRecord.GetAttributeValue<string>("adc_name") ?? "ADC Case";
+
+                // Read Original Lodgement Date — try target first (set on form), fall back to retrieved record
+                DateTime? projectStartDate = target.GetAttributeValue<DateTime?>("adc_originallodgementdate")
+                    ?? caseRecord.GetAttributeValue<DateTime?>("adc_originallodgementdate");
+                if (projectStartDate.HasValue)
+                {
+                    // Normalize to noon UTC to avoid timezone boundary off-by-one
+                    projectStartDate = DateTime.SpecifyKind(projectStartDate.Value.Date.AddHours(12), DateTimeKind.Utc);
+                }
+                tracingService.Trace("CaseCreatePlugin: Original Lodgement Date = {0}",
+                    projectStartDate.HasValue ? projectStartDate.Value.ToString("o") : "(not set)");
 
                 Guid? initiatingUserId = null;
                 var createdBy = caseRecord.GetAttributeValue<EntityReference>("createdby");
@@ -103,7 +114,7 @@ namespace ADC.MppImport.Plugins
                 tracingService.Trace("CaseCreatePlugin: Calling InitializeJob...");
                 var importService = new MppAsyncImportService(service, tracingService);
                 Guid jobId = importService.InitializeJob(
-                    mppBytes, projectId, templateRef.Id, null,
+                    mppBytes, projectId, templateRef.Id, projectStartDate,
                     caseId: caseId, initiatingUserId: initiatingUserId);
                 tracingService.Trace("CaseCreatePlugin: Import job created: {0}", jobId);
 

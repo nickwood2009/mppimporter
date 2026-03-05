@@ -250,9 +250,10 @@ namespace ADC.MppImport.Test
                         ? string.Format("{0} {1}", t.Duration.Value, t.Duration.Units)
                         : "null";
                     string parentStr = t.ParentTaskUniqueID.HasValue ? string.Format("P={0}", t.ParentTaskUniqueID.Value) : "";
-                    Console.WriteLine("  [{0,3}] L{1} {2,-40} Start={3:d}  Dur={4,-18} {5,-8} Pred={6}",
+                    string activeStr = (t.Active ?? true) ? "" : " INACTIVE";
+                    Console.WriteLine("  [{0,3}] L{1} {2,-40} Start={3:d}  Dur={4,-18} {5,-8} Pred={6}{7}",
                         t.UniqueID, t.OutlineLevel, Trunc(t.Name, 40),
-                        t.Start, durStr, parentStr, preds);
+                        t.Start, durStr, parentStr, preds, activeStr);
                 }
 
                 if (project.Resources.Count > 0)

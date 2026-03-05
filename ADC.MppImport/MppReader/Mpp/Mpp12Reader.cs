@@ -276,7 +276,8 @@ namespace ADC.MppImport.MppReader.Mpp
                     task.Deadline = ReadFixedTimestamp(data, fm, (int)TaskFieldIndex.Deadline);
 
                     int parentUID = ReadFixedInt(data, fm, (int)TaskFieldIndex.ParentTaskUniqueID);
-                    if (parentUID > 0) task.ParentTaskUniqueID = parentUID;
+                    if (parentUID >= 0 && parentUID != uniqueID)
+                        task.ParentTaskUniqueID = parentUID;
                     task.OutlineLevel = ReadFixedShort(data, fm, (int)TaskFieldIndex.OutlineLevel);
 
                     int duVal = ReadFixedShort(data, fm, (int)TaskFieldIndex.DurationUnits);
@@ -316,7 +317,31 @@ namespace ADC.MppImport.MppReader.Mpp
                     }
 
                     task.Milestone = (rawDur == 0);
-                    task.Active = true;
+
+                    // Read Active field from metadata or fixed data
+                    bool isActive = true;
+                    var activeItem = fm.GetFieldItem((int)TaskFieldIndex.Active);
+                    if (activeItem != null)
+                    {
+                        if (activeItem.Location == FieldLocation.MetaData && activeItem.MetaDataIndex >= 0)
+                        {
+                            byte[] taskMeta = taskFixedMeta.GetByteArrayValue(entry.Value);
+                            if (taskMeta != null)
+                            {
+                                int totalBit = 3 + activeItem.MetaDataIndex;
+                                int byteIdx = 4 + (totalBit / 8);
+                                int bitMask = 1 << (totalBit % 8);
+                                if (byteIdx < taskMeta.Length)
+                                    isActive = (taskMeta[byteIdx] & bitMask) != 0;
+                            }
+                        }
+                        else if (activeItem.Location == FieldLocation.FixedData)
+                        {
+                            isActive = (ReadFixedShort(data, fm, (int)TaskFieldIndex.Active) != 0);
+                        }
+                    }
+                    task.Active = isActive;
+
                     if (task.Name == null && task.Start == null && task.Finish == null) continue;
                     m_file.Tasks.Add(task);
                 }

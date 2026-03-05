@@ -391,6 +391,14 @@ namespace ADC.MppImport.MppReader.Mpp
 
                 int itemCount = taskFixedMeta.AdjustedItemCount;
 
+                // Diagnostic: Active field map info
+                var activeFieldItem = fm.GetFieldItem((int)TaskFieldIndex.Active);
+                if (activeFieldItem != null)
+                    m_file.DiagnosticMessages.Add(string.Format("Active field: Location={0}, Category=0x{1:X2}, MetaIdx={2}",
+                        activeFieldItem.Location, activeFieldItem.Category, activeFieldItem.MetaDataIndex));
+                else
+                    m_file.DiagnosticMessages.Add("Active field: NOT in field map");
+
                 // Build task map: skip first 3 items (not real tasks)
                 var taskMap = new SortedDictionary<int, int>();
                 for (int loop = itemCount - 1; loop > 2; loop--)
@@ -454,7 +462,8 @@ namespace ADC.MppImport.MppReader.Mpp
 
                     // Hierarchy
                     int parentUniqueID = ReadFixedInt(data, fm, (int)TaskFieldIndex.ParentTaskUniqueID);
-                    if (parentUniqueID > 0) task.ParentTaskUniqueID = parentUniqueID;
+                    if (parentUniqueID >= 0 && parentUniqueID != uniqueID)
+                        task.ParentTaskUniqueID = parentUniqueID;
                     task.OutlineLevel = ReadFixedShortFromBlock(data, data2, fm, (int)TaskFieldIndex.OutlineLevel);
 
                     // Duration units: try VarData/FixedData first, then infer from date range
@@ -540,7 +549,31 @@ namespace ADC.MppImport.MppReader.Mpp
                     // Milestone: a task is a milestone if its duration is zero
                     task.Milestone = (rawDuration == 0);
 
-                    task.Active = true;
+                    // Read Active field from metadata or fixed data
+                    bool isActive = true;
+                    var activeItem = fm.GetFieldItem((int)TaskFieldIndex.Active);
+                    if (activeItem != null)
+                    {
+                        if (activeItem.Location == FieldLocation.MetaData && activeItem.MetaDataIndex >= 0)
+                        {
+                            byte[] taskMeta = taskFixedMeta.GetByteArrayValue(index);
+                            if (taskMeta != null)
+                            {
+                                // Metadata booleans start at byte 4 (after the 4-byte flags int).
+                                // 3 reserved built-in boolean slots precede the field-map booleans.
+                                int totalBit = 3 + activeItem.MetaDataIndex;
+                                int byteIdx = 4 + (totalBit / 8);
+                                int bitMask = 1 << (totalBit % 8);
+                                if (byteIdx < taskMeta.Length)
+                                    isActive = (taskMeta[byteIdx] & bitMask) != 0;
+                            }
+                        }
+                        else if (activeItem.Location == FieldLocation.FixedData)
+                        {
+                            isActive = (ReadFixedShort(data, fm, (int)TaskFieldIndex.Active) != 0);
+                        }
+                    }
+                    task.Active = isActive;
 
                     if (task.Name == null && task.Start == null && task.Finish == null)
                         continue;

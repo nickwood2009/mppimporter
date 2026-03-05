@@ -44,8 +44,12 @@ namespace ADC.MppImport.Services
             if (project.Tasks.Count == 0)
                 throw new InvalidPluginExecutionException("No tasks found in MPP file.");
 
+            int inactiveCount = project.Tasks.Count(t => t.UniqueID.HasValue && !(t.Active ?? true));
+            if (inactiveCount > 0)
+                _trace?.Trace("Filtered out {0} inactive tasks", inactiveCount);
+
             var sortedByOrder = project.Tasks
-                .Where(t => t.UniqueID.HasValue)
+                .Where(t => t.UniqueID.HasValue && (t.Active ?? true))
                 .ToList();
 
             DeriveParentRelationships(sortedByOrder);
@@ -112,7 +116,12 @@ namespace ADC.MppImport.Services
             job[ImportJobFields.TaskDataJson] = taskDataJson;
             job[ImportJobFields.ErrorMessage] = "";
             if (projectStartDate.HasValue)
-                job[ImportJobFields.ProjectStartDate] = projectStartDate.Value;
+            {
+                // Normalize to noon UTC to avoid timezone boundary off-by-one
+                DateTime normalized = projectStartDate.Value.Date.AddHours(12);
+                normalized = DateTime.SpecifyKind(normalized, DateTimeKind.Utc);
+                job[ImportJobFields.ProjectStartDate] = normalized;
+            }
             if (caseId.HasValue)
                 job[ImportJobFields.Case] = new EntityReference("adc_case", caseId.Value);
             if (initiatingUserId.HasValue)
@@ -260,6 +269,29 @@ namespace ADC.MppImport.Services
             var taskLookup = payload.Tasks.ToDictionary(t => t.UniqueID);
             var projectRef = new EntityReference("msdyn_project", projectId);
             var bucketRef = new EntityReference("msdyn_projectbucket", Guid.Parse(payload.BucketId));
+
+            // On first batch, apply project start date if set
+            if (batchIndex == 0)
+            {
+                DateTime? projectStartDate = job.GetAttributeValue<DateTime?>(ImportJobFields.ProjectStartDate);
+                if (projectStartDate.HasValue)
+                {
+                    // Normalize to noon UTC to avoid timezone boundary off-by-one
+                    DateTime normalized = projectStartDate.Value.Date.AddHours(12);
+                    normalized = DateTime.SpecifyKind(normalized, DateTimeKind.Utc);
+                    _trace?.Trace("Setting project start date to {0:yyyy-MM-dd} (noon UTC: {1:o})",
+                        projectStartDate.Value, normalized);
+
+                    string startOsId = CreateOperationSet(projectId, "Set project start date");
+                    var projectUpdate = new Entity("msdyn_project", projectId);
+                    projectUpdate["msdyn_scheduledstart"] = normalized;
+                    PssUpdate(projectUpdate, startOsId);
+                    ExecuteOperationSet(startOsId);
+
+                    // Brief wait for the start date to take effect before creating tasks
+                    System.Threading.Thread.Sleep(3000);
+                }
+            }
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 

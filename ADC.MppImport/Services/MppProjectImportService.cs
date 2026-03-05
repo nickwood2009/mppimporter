@@ -90,8 +90,12 @@ namespace ADC.MppImport.Services
 
             // 6. Derive parent from OutlineLevel for tasks where ParentTask was not set by the MPP reader.
             //    Must run before task entity creation so HasChildTasks is correct for summary detection.
+            int inactiveCount = project.Tasks.Count(t => t.UniqueID.HasValue && !(t.Active ?? true));
+            if (inactiveCount > 0)
+                _trace?.Trace("Filtered out {0} inactive tasks", inactiveCount);
+
             var sortedByOrder = project.Tasks
-                .Where(t => t.UniqueID.HasValue)
+                .Where(t => t.UniqueID.HasValue && (t.Active ?? true))
                 .ToList(); // preserve MPP file order (= outline order)
 
             // Dump reader diagnostics
@@ -283,9 +287,13 @@ namespace ADC.MppImport.Services
 
             if (projectStartDate.HasValue)
             {
-                _trace?.Trace("Setting project start date to {0:yyyy-MM-dd}", projectStartDate.Value);
+                // Normalize to noon UTC to avoid timezone boundary off-by-one
+                DateTime normalized = projectStartDate.Value.Date.AddHours(12);
+                normalized = DateTime.SpecifyKind(normalized, DateTimeKind.Utc);
+                _trace?.Trace("Setting project start date to {0:yyyy-MM-dd} (noon UTC: {1:o})",
+                    projectStartDate.Value, normalized);
                 var projectUpdate = new Entity("msdyn_project", projectId);
-                projectUpdate["msdyn_scheduledstart"] = projectStartDate.Value;
+                projectUpdate["msdyn_scheduledstart"] = normalized;
                 phase1Ops.Add(osId => PssUpdate(projectUpdate, osId));
             }
 

@@ -114,7 +114,11 @@ namespace ADC.MppImport.Plugins
                     new ColumnSet("adc_name", "createdby", "adc_originallodgementdate"));
                 string caseName = caseRecord.GetAttributeValue<string>("adc_name") ?? "ADC Case";
 
-                DateTime? projectStartDate = caseRecord.GetAttributeValue<DateTime?>("adc_originallodgementdate");
+                // Read Original Lodgement Date — try target first (set on form), fall back to retrieved record
+                DateTime? projectStartDate = target.GetAttributeValue<DateTime?>("adc_originallodgementdate")
+                    ?? caseRecord.GetAttributeValue<DateTime?>("adc_originallodgementdate");
+                trace.Trace("Original Lodgement Date: {0}",
+                    projectStartDate.HasValue ? projectStartDate.Value.ToString("o") : "(not set)");
                 Guid? initiatingUserId = null;
                 var createdBy = caseRecord.GetAttributeValue<EntityReference>("createdby");
                 if (createdBy != null)

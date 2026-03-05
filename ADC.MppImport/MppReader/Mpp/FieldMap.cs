@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using ADC.MppImport.MppReader.Common;
 
 namespace ADC.MppImport.MppReader.Mpp
@@ -131,6 +132,7 @@ namespace ADC.MppImport.MppReader.Mpp
         public int DataBlockOffset { get; set; }
         public int VarDataKey { get; set; }
         public int Category { get; set; }
+        public int MetaDataIndex { get; set; } = -1;
     }
 
     /// <summary>
@@ -265,6 +267,17 @@ namespace ADC.MppImport.MppReader.Mpp
 
                 m_map[fieldIndex] = item;
                 index += 28;
+            }
+
+            // Assign MetaDataIndex for category 0x64 metadata boolean fields.
+            // Metadata booleans are stored in fieldIndex-sorted order, but ONLY
+            // for fields that actually end up in the map as 0x64.
+            // Re-walk the map sorted by key and assign sequential indices.
+            int metaIdx = 0;
+            foreach (var kvp in m_map.OrderBy(k => k.Key))
+            {
+                if (kvp.Value.Category == 0x64)
+                    kvp.Value.MetaDataIndex = metaIdx++;
             }
         }
 

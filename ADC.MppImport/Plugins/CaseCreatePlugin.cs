@@ -76,8 +76,12 @@ namespace ADC.MppImport.Plugins
                 }
 
                 var caseRecord = service.Retrieve("adc_case", caseId,
-                    new ColumnSet("adc_name", "createdby", "adc_originallodgementdate"));
+                    new ColumnSet("adc_name", "adc_casenumber", "createdby", "adc_originallodgementdate"));
                 string caseName = caseRecord.GetAttributeValue<string>("adc_name") ?? "ADC Case";
+                string caseNumber = caseRecord.GetAttributeValue<string>("adc_casenumber");
+                string projectName = !string.IsNullOrEmpty(caseNumber)
+                    ? string.Format("{0} - {1}", caseName, caseNumber)
+                    : caseName;
 
                 // Read Original Lodgement Date — try target first (set on form), fall back to retrieved record
                 DateTime? projectStartDate = target.GetAttributeValue<DateTime?>("adc_originallodgementdate")
@@ -93,8 +97,9 @@ namespace ADC.MppImport.Plugins
                     initiatingUserId = context.InitiatingUserId;
 
                 var projectEntity = new Entity("msdyn_project");
-                projectEntity["msdyn_subject"] = caseName;
-                tracingService.Trace("CaseCreatePlugin: Creating project '{0}'...", caseName);
+                projectEntity["msdyn_subject"] = projectName;
+                projectEntity["adc_parentadccase"] = new EntityReference("adc_case", caseId);
+                tracingService.Trace("CaseCreatePlugin: Creating project '{0}'...", projectName);
                 Guid projectId = service.Create(projectEntity);
                 tracingService.Trace("CaseCreatePlugin: Project created: {0}", projectId);
 

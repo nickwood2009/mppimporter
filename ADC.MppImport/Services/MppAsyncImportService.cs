@@ -116,12 +116,7 @@ namespace ADC.MppImport.Services
             job[ImportJobFields.TaskDataJson] = taskDataJson;
             job[ImportJobFields.ErrorMessage] = "";
             if (projectStartDate.HasValue)
-            {
-                // Normalize to noon UTC to avoid timezone boundary off-by-one
-                DateTime normalized = projectStartDate.Value.Date.AddHours(12);
-                normalized = DateTime.SpecifyKind(normalized, DateTimeKind.Utc);
-                job[ImportJobFields.ProjectStartDate] = normalized;
-            }
+                job[ImportJobFields.ProjectStartDate] = projectStartDate.Value;
             if (caseId.HasValue)
                 job[ImportJobFields.Case] = new EntityReference("adc_case", caseId.Value);
             if (initiatingUserId.HasValue)
@@ -276,15 +271,11 @@ namespace ADC.MppImport.Services
                 DateTime? projectStartDate = job.GetAttributeValue<DateTime?>(ImportJobFields.ProjectStartDate);
                 if (projectStartDate.HasValue)
                 {
-                    // Normalize to noon UTC to avoid timezone boundary off-by-one
-                    DateTime normalized = projectStartDate.Value.Date.AddHours(12);
-                    normalized = DateTime.SpecifyKind(normalized, DateTimeKind.Utc);
-                    _trace?.Trace("Setting project start date to {0:yyyy-MM-dd} (noon UTC: {1:o})",
-                        projectStartDate.Value, normalized);
+                    _trace?.Trace("Setting project start date: {0:o}", projectStartDate.Value);
 
                     string startOsId = CreateOperationSet(projectId, "Set project start date");
                     var projectUpdate = new Entity("msdyn_project", projectId);
-                    projectUpdate["msdyn_scheduledstart"] = normalized;
+                    projectUpdate["msdyn_scheduledstart"] = projectStartDate.Value;
                     PssUpdate(projectUpdate, startOsId);
                     ExecuteOperationSet(startOsId);
 

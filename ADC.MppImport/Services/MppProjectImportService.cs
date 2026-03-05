@@ -287,13 +287,9 @@ namespace ADC.MppImport.Services
 
             if (projectStartDate.HasValue)
             {
-                // Normalize to noon UTC to avoid timezone boundary off-by-one
-                DateTime normalized = projectStartDate.Value.Date.AddHours(12);
-                normalized = DateTime.SpecifyKind(normalized, DateTimeKind.Utc);
-                _trace?.Trace("Setting project start date to {0:yyyy-MM-dd} (noon UTC: {1:o})",
-                    projectStartDate.Value, normalized);
+                _trace?.Trace("Setting project start date: {0:o}", projectStartDate.Value);
                 var projectUpdate = new Entity("msdyn_project", projectId);
-                projectUpdate["msdyn_scheduledstart"] = normalized;
+                projectUpdate["msdyn_scheduledstart"] = projectStartDate.Value;
                 phase1Ops.Add(osId => PssUpdate(projectUpdate, osId));
             }
 

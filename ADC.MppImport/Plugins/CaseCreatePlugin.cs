@@ -82,12 +82,7 @@ namespace ADC.MppImport.Plugins
                 // Read Original Lodgement Date — try target first (set on form), fall back to retrieved record
                 DateTime? projectStartDate = target.GetAttributeValue<DateTime?>("adc_originallodgementdate")
                     ?? caseRecord.GetAttributeValue<DateTime?>("adc_originallodgementdate");
-                if (projectStartDate.HasValue)
-                {
-                    // Normalize to noon UTC to avoid timezone boundary off-by-one
-                    projectStartDate = DateTime.SpecifyKind(projectStartDate.Value.Date.AddHours(12), DateTimeKind.Utc);
-                }
-                tracingService.Trace("CaseCreatePlugin: Original Lodgement Date = {0}",
+                tracingService.Trace("CaseCreatePlugin: Original Lodgement Date raw = {0}",
                     projectStartDate.HasValue ? projectStartDate.Value.ToString("o") : "(not set)");
 
                 Guid? initiatingUserId = null;

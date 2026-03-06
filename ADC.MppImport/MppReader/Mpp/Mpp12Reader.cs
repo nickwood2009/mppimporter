@@ -318,26 +318,20 @@ namespace ADC.MppImport.MppReader.Mpp
 
                     task.Milestone = (rawDur == 0);
 
-                    // Read Active field from metadata or fixed data
+                    // Read Active field from metadata booleans.
+                    // Each boolean field uses 2 bits (value + defined), starting at byte 8.
                     bool isActive = true;
                     var activeItem = fm.GetFieldItem((int)TaskFieldIndex.Active);
-                    if (activeItem != null)
+                    if (activeItem != null && activeItem.Location == FieldLocation.MetaData && activeItem.MetaDataIndex >= 0)
                     {
-                        if (activeItem.Location == FieldLocation.MetaData && activeItem.MetaDataIndex >= 0)
+                        byte[] taskMeta = taskFixedMeta.GetByteArrayValue(entry.Value);
+                        if (taskMeta != null)
                         {
-                            byte[] taskMeta = taskFixedMeta.GetByteArrayValue(entry.Value);
-                            if (taskMeta != null)
-                            {
-                                int totalBit = 3 + activeItem.MetaDataIndex;
-                                int byteIdx = 4 + (totalBit / 8);
-                                int bitMask = 1 << (totalBit % 8);
-                                if (byteIdx < taskMeta.Length)
-                                    isActive = (taskMeta[byteIdx] & bitMask) != 0;
-                            }
-                        }
-                        else if (activeItem.Location == FieldLocation.FixedData)
-                        {
-                            isActive = (ReadFixedShort(data, fm, (int)TaskFieldIndex.Active) != 0);
+                            int totalBit = activeItem.MetaDataIndex * 2;
+                            int byteIdx = 8 + (totalBit / 8);
+                            int bitMask = 1 << (totalBit % 8);
+                            if (byteIdx < taskMeta.Length)
+                                isActive = (taskMeta[byteIdx] & bitMask) != 0;
                         }
                     }
                     task.Active = isActive;

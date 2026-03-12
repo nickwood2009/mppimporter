@@ -509,6 +509,17 @@ namespace ADC.MppImport.Services
 
             _trace?.Trace("Import complete. {0} batches, Created: {1}, Updated: {2}, Dependencies: {3}",
                 batchNum, result.TasksCreated, result.TasksUpdated, result.DependenciesCreated);
+
+            // Duration variance detection pass
+            try
+            {
+                UpdateDurationVarianceFields(projectId, sortedByOrder, summaryTaskIds, actualTaskIdMap);
+            }
+            catch (Exception varEx)
+            {
+                _trace?.Trace("Duration variance pass failed (non-fatal): {0}", varEx.Message);
+            }
+
             return result;
         }
 
@@ -735,6 +746,224 @@ namespace ADC.MppImport.Services
                 string val = attr.Value is OptionSetValue osv ? osv.Value.ToString() : (attr.Value?.ToString() ?? "(null)");
                 _trace?.Trace("  OperationSet.{0} = {1}", attr.Key, val);
             }
+        }
+
+        #endregion
+
+        #region Duration Variance
+
+        private void UpdateDurationVarianceFields(Guid projectId, List<Task> sortedByOrder,
+            HashSet<int> summaryTaskIds, Dictionary<int, Guid> actualTaskIdMap)
+        {
+            _trace?.Trace("Updating duration variance fields for project {0}...", projectId);
+
+            // Build source duration map: CRM GUID -> SourceDurationInfo, and UID -> SourceDurationInfo
+            var srcMap = new Dictionary<Guid, SourceDurationInfo>();
+            var srcByUid = new Dictionary<int, SourceDurationInfo>();
+            foreach (var mppTask in sortedByOrder)
+            {
+                if (!mppTask.UniqueID.HasValue) continue;
+
+                bool isSummary = summaryTaskIds.Contains(mppTask.UniqueID.Value);
+                int srcDays = 0;
+                int srcHours = 0;
+                bool isMilestone = false;
+
+                if (!isSummary && mppTask.Duration != null && mppTask.Duration.Value >= 0)
+                {
+                    double hours = ConvertToHours(mppTask.Duration);
+                    srcDays = (int)Math.Round(hours / 8.0);
+                    srcHours = (int)Math.Round(hours);
+                    isMilestone = mppTask.Duration.Value == 0;
+                }
+
+                var info = new SourceDurationInfo
+                {
+                    UniqueID = mppTask.UniqueID.Value,
+                    SourceDurationDays = srcDays,
+                    SourceDurationHours = srcHours,
+                    IsMilestone = isMilestone,
+                    IsSummary = isSummary
+                };
+
+                srcByUid[mppTask.UniqueID.Value] = info;
+
+                Guid crmGuid;
+                if (actualTaskIdMap.TryGetValue(mppTask.UniqueID.Value, out crmGuid))
+                    srcMap[crmGuid] = info;
+            }
+
+            // Build FF predecessor map: successor UID -> list of predecessor UIDs
+            var ffPredecessors = new Dictionary<int, List<int>>();
+            foreach (var mppTask in sortedByOrder)
+            {
+                if (!mppTask.UniqueID.HasValue) continue;
+                if (mppTask.Predecessors == null || mppTask.Predecessors.Count == 0) continue;
+
+                foreach (var relation in mppTask.Predecessors)
+                {
+                    if (relation.Type == RelationType.FinishToFinish)
+                    {
+                        List<int> preds;
+                        if (!ffPredecessors.TryGetValue(mppTask.UniqueID.Value, out preds))
+                        {
+                            preds = new List<int>();
+                            ffPredecessors[mppTask.UniqueID.Value] = preds;
+                        }
+                        preds.Add(relation.SourceTaskUniqueID);
+                    }
+                }
+            }
+
+            if (ffPredecessors.Count > 0)
+                _trace?.Trace("  FF dependency successors detected: {0}", ffPredecessors.Count);
+
+            // Query all project tasks for PSS-computed duration
+            var query = new QueryExpression("msdyn_projecttask")
+            {
+                ColumnSet = new ColumnSet("msdyn_projecttaskid", "msdyn_duration", "msdyn_subject",
+                    "msdyn_scheduledstart", "msdyn_scheduledend"),
+                Criteria = new FilterExpression
+                {
+                    Conditions =
+                    {
+                        new ConditionExpression("msdyn_project", ConditionOperator.Equal, projectId)
+                    }
+                }
+            };
+
+            var tasks = _service.RetrieveMultiple(query);
+            _trace?.Trace("  Retrieved {0} project tasks for variance check", tasks.Entities.Count);
+
+            int updated = 0;
+            int skipped = 0;
+            foreach (var taskEntity in tasks.Entities)
+            {
+                SourceDurationInfo src;
+                if (!srcMap.TryGetValue(taskEntity.Id, out src))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                var taskUpdate = new Entity("msdyn_projecttask", taskEntity.Id);
+                taskUpdate["adc_sourcedurationdays"] = src.SourceDurationDays;
+                taskUpdate["adc_sourcedurationhours"] = src.SourceDurationHours;
+                taskUpdate["adc_issourcemilestone"] = src.IsMilestone;
+
+                decimal? pssDuration = taskEntity.GetAttributeValue<decimal?>("msdyn_duration");
+                if (pssDuration.HasValue && !src.IsSummary)
+                {
+                    double varianceDays = (double)pssDuration.Value - src.SourceDurationDays;
+                    taskUpdate["adc_durationvariancedays"] = Math.Round((decimal)varianceDays, 2);
+
+                    string reason = GetVarianceReason(src, pssDuration.Value, taskEntity,
+                        ffPredecessors, srcByUid);
+                    if (!string.IsNullOrEmpty(reason))
+                        taskUpdate["adc_durationvariancereason"] = reason;
+                }
+                else if (src.IsSummary)
+                {
+                    taskUpdate["adc_durationvariancereason"] = "Summary task - PSS auto-calculates from children";
+                }
+
+                try
+                {
+                    _service.Update(taskUpdate);
+                    updated++;
+                }
+                catch (Exception ex)
+                {
+                    _trace?.Trace("  Failed to update variance for task {0}: {1}", taskEntity.Id, ex.Message);
+                }
+            }
+
+            _trace?.Trace("  Variance fields updated: {0}, skipped: {1}", updated, skipped);
+        }
+
+        private string GetVarianceReason(SourceDurationInfo src, decimal pssDuration, Entity taskEntity,
+            Dictionary<int, List<int>> ffPredecessors, Dictionary<int, SourceDurationInfo> srcByUid)
+        {
+            double pssDays = (double)pssDuration;
+            int srcDays = src.SourceDurationDays;
+            double diff = pssDays - srcDays;
+
+            // Check for FF dependency misalignment (known PSS bug)
+            string ffWarning = CheckFFMisalignment(src.UniqueID, src.SourceDurationDays,
+                ffPredecessors, srcByUid);
+
+            if (src.IsMilestone && pssDays == 0)
+                return AppendFF("Milestone - no duration", ffWarning);
+
+            if (src.IsMilestone && pssDays > 0)
+                return AppendFF(string.Format("Source was milestone (0d), PSS scheduled as {0:0.##}d", pssDays), ffWarning);
+
+            if (Math.Abs(diff) < 0.01)
+                return ffWarning;
+
+            if (srcDays == 1 && pssDays == 1)
+            {
+                DateTime? start = taskEntity.GetAttributeValue<DateTime?>("msdyn_scheduledstart");
+                DateTime? finish = taskEntity.GetAttributeValue<DateTime?>("msdyn_scheduledend");
+                if (start.HasValue && finish.HasValue && start.Value.Date == finish.Value.Date)
+                    return AppendFF("1 working day - starts and finishes on same calendar day", ffWarning);
+                return ffWarning;
+            }
+
+            if (diff > 0 && srcDays >= 5)
+            {
+                int weeks = srcDays / 5;
+                int expectedWeekendDays = weeks * 2;
+                if (Math.Abs(diff - expectedWeekendDays) <= 1)
+                    return AppendFF(string.Format("Source: {0}d, PSS: {1:0.##}d - adjusted for non-working days (weekends)", srcDays, pssDays), ffWarning);
+            }
+
+            if (diff > 0)
+                return AppendFF(string.Format("Source: {0}d, PSS: {1:0.##}d - PSS added {2:0.##}d (scheduling adjustment)", srcDays, pssDays, diff), ffWarning);
+
+            if (diff < 0)
+                return AppendFF(string.Format("Source: {0}d, PSS: {1:0.##}d - PSS reduced by {2:0.##}d", srcDays, pssDays, Math.Abs(diff)), ffWarning);
+
+            return ffWarning;
+        }
+
+        private string CheckFFMisalignment(int successorUid, int successorSrcDays,
+            Dictionary<int, List<int>> ffPredecessors, Dictionary<int, SourceDurationInfo> srcByUid)
+        {
+            List<int> predUids;
+            if (!ffPredecessors.TryGetValue(successorUid, out predUids))
+                return null;
+
+            foreach (int predUid in predUids)
+            {
+                SourceDurationInfo predSrc;
+                if (!srcByUid.TryGetValue(predUid, out predSrc)) continue;
+
+                if (successorSrcDays > predSrc.SourceDurationDays)
+                {
+                    return string.Format("FF dep: successor ({0}d) > predecessor [{1}] ({2}d) - PSS may not align finish dates (known platform limitation)",
+                        successorSrcDays, predUid, predSrc.SourceDurationDays);
+                }
+            }
+
+            return null;
+        }
+
+        private static string AppendFF(string reason, string ffWarning)
+        {
+            if (string.IsNullOrEmpty(ffWarning)) return reason;
+            if (string.IsNullOrEmpty(reason)) return ffWarning;
+            string combined = reason + " | " + ffWarning;
+            return combined.Length > 200 ? combined.Substring(0, 197) + "..." : combined;
+        }
+
+        private class SourceDurationInfo
+        {
+            public int UniqueID;
+            public int SourceDurationDays;
+            public int SourceDurationHours;
+            public bool IsMilestone;
+            public bool IsSummary;
         }
 
         #endregion

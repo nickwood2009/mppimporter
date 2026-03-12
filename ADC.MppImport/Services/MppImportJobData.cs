@@ -91,6 +91,15 @@ namespace ADC.MppImport.Services
 
         [DataMember(Name = "preGenGuid")]
         public string PreGenGuid { get; set; }
+
+        [DataMember(Name = "srcDurDays")]
+        public int SourceDurationDays { get; set; }
+
+        [DataMember(Name = "srcDurHours")]
+        public int SourceDurationHours { get; set; }
+
+        [DataMember(Name = "isMilestone")]
+        public bool IsMilestone { get; set; }
     }
 
     [DataContract]

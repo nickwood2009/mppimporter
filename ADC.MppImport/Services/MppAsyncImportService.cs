@@ -881,11 +881,11 @@ namespace ADC.MppImport.Services
                 taskUpdate["adc_issourcemilestone"] = dto.IsMilestone;
 
                 // Compute variance
-                decimal? pssDuration = taskEntity.GetAttributeValue<decimal?>("msdyn_duration");
+                double? pssDuration = taskEntity.GetAttributeValue<double?>("msdyn_duration");
                 if (pssDuration.HasValue && !dto.IsSummary)
                 {
-                    double varianceDays = (double)pssDuration.Value - dto.SourceDurationDays;
-                    taskUpdate["adc_durationvariancedays"] = Math.Round((decimal)varianceDays, 2);
+                    double varianceDays = pssDuration.Value - dto.SourceDurationDays;
+                    taskUpdate["adc_durationvariancedays"] = Math.Round(varianceDays, 2);
 
                     string reason = GetVarianceReason(dto, pssDuration.Value, taskEntity,
                         ffPredecessors, dtoByUid);
@@ -911,10 +911,10 @@ namespace ADC.MppImport.Services
             _trace?.Trace("  Variance fields updated: {0}, skipped: {1}", updated, skipped);
         }
 
-        private string GetVarianceReason(TaskDto dto, decimal pssDuration, Entity taskEntity,
+        private string GetVarianceReason(TaskDto dto, double pssDuration, Entity taskEntity,
             Dictionary<int, List<int>> ffPredecessors, Dictionary<int, TaskDto> dtoByUid)
         {
-            double pssDays = (double)pssDuration;
+            double pssDays = pssDuration;
             int srcDays = dto.SourceDurationDays;
             double diff = pssDays - srcDays;
 

@@ -95,9 +95,23 @@ namespace ADC.MppImport.Services
                 // Custom fields from MPP — store raw strings, convert at write time
                 if (mppTask.CustomFields.Count > 0)
                 {
+                    // Diagnostic: dump all custom field keys/values for first 3 tasks
+                    if (dto.UniqueID > 0 && dto.UniqueID <= 3)
+                    {
+                        foreach (var cf in mppTask.CustomFields)
+                        {
+                            string valStr = cf.Value != null ? cf.Value.ToString() : "(null)";
+                            string typStr = cf.Value != null ? cf.Value.GetType().Name : "?";
+                            _trace?.Trace("  [CF] UID={0} Key=\"{1}\" Type={2} Value=\"{3}\"",
+                                dto.UniqueID, cf.Key, typStr, valStr);
+                        }
+                    }
                     object v;
                     if (mppTask.CustomFields.TryGetValue("Day Count", out v) && v != null)
-                        dto.DayCount = v is int ? (int?)v : null;
+                    {
+                        if (v is int) dto.DayCount = (int)v;
+                        else { int dc; if (int.TryParse(v.ToString(), out dc)) dto.DayCount = dc; }
+                    }
                     if (mppTask.CustomFields.TryGetValue("Baseline 1", out v) && v != null)
                         dto.Baseline1 = v.ToString();
                     if (mppTask.CustomFields.TryGetValue("Baseline 2", out v) && v != null)

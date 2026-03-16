@@ -210,6 +210,9 @@ namespace ADC.MppImport.Services
 
         public void ProcessJob(Guid jobId)
         {
+            var asm = System.Reflection.Assembly.GetExecutingAssembly().GetName();
+            _trace?.Trace("ADC.MppImport v{0} (Async)", asm.Version);
+
             var job = _service.Retrieve(ImportJobFields.EntityName, jobId, new ColumnSet(true));
 
             int status = GetOptionSetValue(job, ImportJobFields.Status);
@@ -918,6 +921,9 @@ namespace ADC.MppImport.Services
                 _trace?.Trace("  [DIAG] UID={0} Name={1} SrcDays={2} SrcHours={3} DurHours={4} IsMilestone={5} IsSummary={6}",
                     dto2.UniqueID, dto2.Name, dto2.SourceDurationDays, dto2.SourceDurationHours,
                     dto2.DurationHours, dto2.IsMilestone, dto2.IsSummary);
+                _trace?.Trace("    CF: DayCount={0} B1=\"{1}\" B2=\"{2}\" B3=\"{3}\" Role=\"{4}\" Mile=\"{5}\"",
+                    dto2.DayCount, dto2.Baseline1 ?? "", dto2.Baseline2 ?? "", dto2.Baseline3 ?? "",
+                    dto2.AssigneeRole ?? "", dto2.Milestone ?? "");
             }
 
             int updated = 0;

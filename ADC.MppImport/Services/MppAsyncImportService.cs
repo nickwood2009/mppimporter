@@ -34,6 +34,9 @@ namespace ADC.MppImport.Services
 
         public Guid InitializeJob(byte[] mppBytes, Guid projectId, Guid? caseTemplateId, DateTime? projectStartDate, Guid? caseId = null, Guid? initiatingUserId = null)
         {
+            var asm = System.Reflection.Assembly.GetExecutingAssembly().GetName();
+            _trace?.Trace("ADC.MppImport v{0} (Async)", asm.Version);
+
             if (mppBytes == null || mppBytes.Length == 0)
                 throw new InvalidPluginExecutionException("MPP file bytes are empty.");
 
@@ -66,6 +69,7 @@ namespace ADC.MppImport.Services
             var payload = new ImportJobPayload();
             payload.BucketId = bucketRef.Id.ToString();
 
+            int cfDiagCount = 0;
             foreach (var mppTask in sortedByOrder)
             {
                 if (!mppTask.UniqueID.HasValue) continue;
@@ -95,15 +99,25 @@ namespace ADC.MppImport.Services
                 // Custom fields from MPP — store raw strings, convert at write time
                 if (mppTask.CustomFields.Count > 0)
                 {
-                    // Diagnostic: dump all custom field keys/values for first 3 tasks
-                    if (dto.UniqueID > 0 && dto.UniqueID <= 3)
+                    // Diagnostic: dump all custom field keys/values for first 5 non-summary tasks
+                    if (!dto.IsSummary && cfDiagCount < 5)
                     {
+                        cfDiagCount++;
+                        _trace?.Trace("  [CF-DUMP] UID={0} Name={1} FieldCount={2}",
+                            dto.UniqueID, dto.Name, mppTask.CustomFields.Count);
                         foreach (var cf in mppTask.CustomFields)
                         {
                             string valStr = cf.Value != null ? cf.Value.ToString() : "(null)";
                             string typStr = cf.Value != null ? cf.Value.GetType().Name : "?";
-                            _trace?.Trace("  [CF] UID={0} Key=\"{1}\" Type={2} Value=\"{3}\"",
-                                dto.UniqueID, cf.Key, typStr, valStr);
+                            // Also log hex for short strings to detect encoding issues
+                            string hexStr = "";
+                            if (cf.Value is string && ((string)cf.Value).Length <= 30)
+                            {
+                                byte[] bytes = System.Text.Encoding.Unicode.GetBytes((string)cf.Value);
+                                hexStr = " Hex=" + BitConverter.ToString(bytes);
+                            }
+                            _trace?.Trace("    Key=\"{0}\" Type={1} Value=\"{2}\"{3}",
+                                cf.Key, typStr, valStr, hexStr);
                         }
                     }
                     object v;

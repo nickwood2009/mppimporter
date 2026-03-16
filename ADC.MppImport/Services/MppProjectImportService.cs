@@ -31,6 +31,9 @@ namespace ADC.MppImport.Services
         /// </summary>
         public ImportResult Execute(Guid caseTemplateId, Guid projectId, DateTime? projectStartDate = null)
         {
+            var asm = System.Reflection.Assembly.GetExecutingAssembly().GetName();
+            _trace?.Trace("ADC.MppImport v{0} (Sync)", asm.Version);
+
             // 1. Download the MPP file bytes from the case template file field
             _trace?.Trace("Downloading MPP file from adc_adccasetemplate {0}...", caseTemplateId);
             byte[] mppBytes = DownloadFileColumn(caseTemplateId, "adc_adccasetemplate", "adc_templatefile");

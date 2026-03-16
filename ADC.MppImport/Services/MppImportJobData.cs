@@ -101,24 +101,9 @@ namespace ADC.MppImport.Services
         [DataMember(Name = "isMilestone")]
         public bool IsMilestone { get; set; }
 
-        // Custom fields from MPP (aliased Text/Date columns)
-        [DataMember(Name = "cfComments")]
-        public string Comments { get; set; }
-
-        [DataMember(Name = "cfMilestones")]
-        public string Milestones { get; set; }
-
+        // Custom fields from MPP mapped to Dataverse adc_ columns
         [DataMember(Name = "cfDayCount")]
-        public string DayCount { get; set; }
-
-        [DataMember(Name = "cfRoles")]
-        public string Roles { get; set; }
-
-        [DataMember(Name = "cfDelayCategory")]
-        public string DelayCategory { get; set; }
-
-        [DataMember(Name = "cfDelayDetail")]
-        public string DelayDetail { get; set; }
+        public int? DayCount { get; set; }
 
         [DataMember(Name = "cfBaseline1")]
         public string Baseline1 { get; set; }
@@ -128,6 +113,12 @@ namespace ADC.MppImport.Services
 
         [DataMember(Name = "cfBaseline3")]
         public string Baseline3 { get; set; }
+
+        [DataMember(Name = "cfAssigneeRole")]
+        public string AssigneeRole { get; set; }
+
+        [DataMember(Name = "cfMilestone")]
+        public string Milestone { get; set; }
     }
 
     [DataContract]

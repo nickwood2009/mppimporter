@@ -5,6 +5,8 @@ using System.Linq;
 using System.Runtime.Serialization.Json;
 using System.Text;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
+using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.Xrm.Sdk.Query;
 using ADC.MppImport.MppReader.Mpp;
 using ADC.MppImport.MppReader.Model;
@@ -90,28 +92,22 @@ namespace ADC.MppImport.Services
                 if (!dto.IsSummary && mppTask.Work != null && mppTask.Work.Value > 0)
                     dto.EffortHours = ConvertToHours(mppTask.Work);
 
-                // Custom fields from MPP (aliased Text/Date columns)
+                // Custom fields from MPP — store raw strings, convert at write time
                 if (mppTask.CustomFields.Count > 0)
                 {
                     object v;
-                    if (mppTask.CustomFields.TryGetValue("Comments", out v) && v != null)
-                        dto.Comments = v.ToString();
-                    if (mppTask.CustomFields.TryGetValue("Milestones", out v) && v != null)
-                        dto.Milestones = v.ToString();
                     if (mppTask.CustomFields.TryGetValue("Day Count", out v) && v != null)
-                        dto.DayCount = v.ToString();
-                    if (mppTask.CustomFields.TryGetValue("Roles", out v) && v != null)
-                        dto.Roles = v.ToString();
-                    if (mppTask.CustomFields.TryGetValue("Delay Category", out v) && v != null)
-                        dto.DelayCategory = v.ToString();
-                    if (mppTask.CustomFields.TryGetValue("Delay Detail", out v) && v != null)
-                        dto.DelayDetail = v.ToString();
+                        dto.DayCount = v is int ? (int?)v : null;
                     if (mppTask.CustomFields.TryGetValue("Baseline 1", out v) && v != null)
                         dto.Baseline1 = v.ToString();
                     if (mppTask.CustomFields.TryGetValue("Baseline 2", out v) && v != null)
                         dto.Baseline2 = v.ToString();
                     if (mppTask.CustomFields.TryGetValue("Baseline 3", out v) && v != null)
                         dto.Baseline3 = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Roles", out v) && v != null)
+                        dto.AssigneeRole = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Milestones", out v) && v != null)
+                        dto.Milestone = v.ToString();
                 }
 
                 Guid preGen = Guid.NewGuid();
@@ -882,6 +878,10 @@ namespace ADC.MppImport.Services
             var tasks = _service.RetrieveMultiple(query);
             _trace?.Trace("  Retrieved {0} project tasks for variance check", tasks.Entities.Count);
 
+            // Load OptionSet label→value maps for choice fields (one-time metadata lookup)
+            var assigneeRoleMap = LoadOptionSetMap("msdyn_projecttask", "adc_assigneerole");
+            var milestoneMap = LoadOptionSetMap("msdyn_projecttask", "adc_milestone");
+
             // Diagnostic: log first 5 DTO values to verify payload deserialization
             int diagCount = 0;
             foreach (var dto2 in payload.Tasks)
@@ -915,24 +915,13 @@ namespace ADC.MppImport.Services
                 taskUpdate["adc_issourcemilestone"] = dto.IsMilestone;
 
                 // Custom fields from MPP
-                if (!string.IsNullOrEmpty(dto.Comments))
-                    taskUpdate["adc_comments"] = dto.Comments;
-                if (!string.IsNullOrEmpty(dto.Milestones))
-                    taskUpdate["adc_milestones"] = dto.Milestones;
-                if (!string.IsNullOrEmpty(dto.DayCount))
-                    taskUpdate["adc_daycount"] = dto.DayCount;
-                if (!string.IsNullOrEmpty(dto.Roles))
-                    taskUpdate["adc_roles"] = dto.Roles;
-                if (!string.IsNullOrEmpty(dto.DelayCategory))
-                    taskUpdate["adc_delaycategory"] = dto.DelayCategory;
-                if (!string.IsNullOrEmpty(dto.DelayDetail))
-                    taskUpdate["adc_delaydetail"] = dto.DelayDetail;
-                if (!string.IsNullOrEmpty(dto.Baseline1))
-                    taskUpdate["adc_baseline1"] = dto.Baseline1;
-                if (!string.IsNullOrEmpty(dto.Baseline2))
-                    taskUpdate["adc_baseline2"] = dto.Baseline2;
-                if (!string.IsNullOrEmpty(dto.Baseline3))
-                    taskUpdate["adc_baseline3"] = dto.Baseline3;
+                if (dto.DayCount.HasValue)
+                    taskUpdate["adc_daycount"] = dto.DayCount.Value;
+                TrySetDecimalValue(taskUpdate, "adc_baseline1", dto.Baseline1);
+                TrySetDecimalValue(taskUpdate, "adc_baseline2", dto.Baseline2);
+                TrySetDecimalValue(taskUpdate, "adc_baseline3", dto.Baseline3);
+                TrySetOptionSetValue(taskUpdate, "adc_assigneerole", dto.AssigneeRole, assigneeRoleMap);
+                TrySetOptionSetValue(taskUpdate, "adc_milestone", dto.Milestone, milestoneMap);
 
                 // Compute variance
                 double? pssDuration = taskEntity.GetAttributeValue<double?>("msdyn_duration");
@@ -1763,6 +1752,78 @@ namespace ADC.MppImport.Services
                 case RelationType.FinishToFinish: return 192350002;
                 case RelationType.StartToFinish: return 192350003;
                 default: return 192350000;
+            }
+        }
+
+        /// <summary>
+        /// Loads an OptionSet's label→value map from Dataverse metadata.
+        /// Returns a case-insensitive dictionary. Returns empty on error.
+        /// </summary>
+        private Dictionary<string, int> LoadOptionSetMap(string entityName, string attributeName)
+        {
+            var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var req = new RetrieveAttributeRequest
+                {
+                    EntityLogicalName = entityName,
+                    LogicalName = attributeName,
+                    RetrieveAsIfPublished = true
+                };
+                var resp = (RetrieveAttributeResponse)_service.Execute(req);
+                var picklistMeta = resp.AttributeMetadata as PicklistAttributeMetadata;
+                if (picklistMeta?.OptionSet?.Options != null)
+                {
+                    foreach (var opt in picklistMeta.OptionSet.Options)
+                    {
+                        string label = opt.Label?.UserLocalizedLabel?.Label;
+                        if (!string.IsNullOrEmpty(label) && opt.Value.HasValue && !map.ContainsKey(label))
+                            map[label] = opt.Value.Value;
+                    }
+                }
+                _trace?.Trace("  OptionSet {0}.{1}: {2} values loaded", entityName, attributeName, map.Count);
+            }
+            catch (Exception ex)
+            {
+                _trace?.Trace("  WARNING: Failed to load OptionSet {0}.{1}: {2}", entityName, attributeName, ex.Message);
+            }
+            return map;
+        }
+
+        /// <summary>
+        /// Tries to set a Decimal field on an entity by parsing the MPP string value.
+        /// Logs a trace warning if parsing fails.
+        /// </summary>
+        private void TrySetDecimalValue(Entity entity, string fieldName, string mppValue)
+        {
+            if (string.IsNullOrWhiteSpace(mppValue)) return;
+            decimal parsed;
+            if (decimal.TryParse(mppValue.Trim(), out parsed))
+            {
+                entity[fieldName] = parsed;
+            }
+            else
+            {
+                _trace?.Trace("  WARNING: Cannot convert {0}='{1}' to decimal", fieldName, mppValue);
+            }
+        }
+
+        /// <summary>
+        /// Tries to set a Choice field on an entity by matching the MPP string value
+        /// against the OptionSet label map. Logs a trace warning if no match found.
+        /// </summary>
+        private void TrySetOptionSetValue(Entity entity, string fieldName, string mppValue, Dictionary<string, int> labelMap)
+        {
+            if (string.IsNullOrWhiteSpace(mppValue)) return;
+            int optionValue;
+            if (labelMap.TryGetValue(mppValue.Trim(), out optionValue))
+            {
+                entity[fieldName] = new OptionSetValue(optionValue);
+            }
+            else
+            {
+                _trace?.Trace("  WARNING: No OptionSet match for {0}='{1}' (available: {2})",
+                    fieldName, mppValue, string.Join(", ", labelMap.Keys));
             }
         }
 

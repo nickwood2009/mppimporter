@@ -1846,6 +1846,7 @@ namespace ADC.MppImport.Services
         /// Tries to set a Choice field on an entity by matching the MPP string value
         /// against the OptionSet label map. Logs a trace warning if no match found.
         /// </summary>
+        private int _optSetWarnCount = 0;
         private void TrySetOptionSetValue(Entity entity, string fieldName, string mppValue, Dictionary<string, int> labelMap)
         {
             if (string.IsNullOrWhiteSpace(mppValue)) return;
@@ -1856,8 +1857,14 @@ namespace ADC.MppImport.Services
             }
             else
             {
-                _trace?.Trace("  WARNING: No OptionSet match for {0}='{1}' (available: {2})",
-                    fieldName, mppValue, string.Join(", ", labelMap.Keys));
+                if (_optSetWarnCount < 6)
+                {
+                    _optSetWarnCount++;
+                    byte[] bytes = System.Text.Encoding.Unicode.GetBytes(mppValue);
+                    string hex = BitConverter.ToString(bytes);
+                    _trace?.Trace("  WARNING: No OptionSet match for {0}='{1}' Len={2} Hex={3} (available: {4})",
+                        fieldName, mppValue, mppValue.Length, hex, string.Join(", ", labelMap.Keys));
+                }
             }
         }
 

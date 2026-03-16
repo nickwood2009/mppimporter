@@ -100,6 +100,34 @@ namespace ADC.MppImport.Services
 
         [DataMember(Name = "isMilestone")]
         public bool IsMilestone { get; set; }
+
+        // Custom fields from MPP (aliased Text/Date columns)
+        [DataMember(Name = "cfComments")]
+        public string Comments { get; set; }
+
+        [DataMember(Name = "cfMilestones")]
+        public string Milestones { get; set; }
+
+        [DataMember(Name = "cfDayCount")]
+        public string DayCount { get; set; }
+
+        [DataMember(Name = "cfRoles")]
+        public string Roles { get; set; }
+
+        [DataMember(Name = "cfDelayCategory")]
+        public string DelayCategory { get; set; }
+
+        [DataMember(Name = "cfDelayDetail")]
+        public string DelayDetail { get; set; }
+
+        [DataMember(Name = "cfBaseline1")]
+        public string Baseline1 { get; set; }
+
+        [DataMember(Name = "cfBaseline2")]
+        public string Baseline2 { get; set; }
+
+        [DataMember(Name = "cfBaseline3")]
+        public string Baseline3 { get; set; }
     }
 
     [DataContract]

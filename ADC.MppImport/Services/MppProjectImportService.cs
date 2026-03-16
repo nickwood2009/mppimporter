@@ -786,6 +786,30 @@ namespace ADC.MppImport.Services
                     IsSummary = isSummary
                 };
 
+                // Custom fields from MPP (aliased Text/Date columns)
+                if (mppTask.CustomFields.Count > 0)
+                {
+                    object v;
+                    if (mppTask.CustomFields.TryGetValue("Comments", out v) && v != null)
+                        info.Comments = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Milestones", out v) && v != null)
+                        info.Milestones = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Day Count", out v) && v != null)
+                        info.DayCount = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Roles", out v) && v != null)
+                        info.Roles = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Delay Category", out v) && v != null)
+                        info.DelayCategory = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Delay Detail", out v) && v != null)
+                        info.DelayDetail = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Baseline 1", out v) && v != null)
+                        info.Baseline1 = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Baseline 2", out v) && v != null)
+                        info.Baseline2 = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Baseline 3", out v) && v != null)
+                        info.Baseline3 = v.ToString();
+                }
+
                 srcByUid[mppTask.UniqueID.Value] = info;
 
                 Guid crmGuid;
@@ -850,6 +874,26 @@ namespace ADC.MppImport.Services
                 taskUpdate["adc_sourcedurationdays"] = src.SourceDurationDays;
                 taskUpdate["adc_sourcedurationhours"] = src.SourceDurationHours;
                 taskUpdate["adc_issourcemilestone"] = src.IsMilestone;
+
+                // Custom fields from MPP
+                if (!string.IsNullOrEmpty(src.Comments))
+                    taskUpdate["adc_comments"] = src.Comments;
+                if (!string.IsNullOrEmpty(src.Milestones))
+                    taskUpdate["adc_milestones"] = src.Milestones;
+                if (!string.IsNullOrEmpty(src.DayCount))
+                    taskUpdate["adc_daycount"] = src.DayCount;
+                if (!string.IsNullOrEmpty(src.Roles))
+                    taskUpdate["adc_roles"] = src.Roles;
+                if (!string.IsNullOrEmpty(src.DelayCategory))
+                    taskUpdate["adc_delaycategory"] = src.DelayCategory;
+                if (!string.IsNullOrEmpty(src.DelayDetail))
+                    taskUpdate["adc_delaydetail"] = src.DelayDetail;
+                if (!string.IsNullOrEmpty(src.Baseline1))
+                    taskUpdate["adc_baseline1"] = src.Baseline1;
+                if (!string.IsNullOrEmpty(src.Baseline2))
+                    taskUpdate["adc_baseline2"] = src.Baseline2;
+                if (!string.IsNullOrEmpty(src.Baseline3))
+                    taskUpdate["adc_baseline3"] = src.Baseline3;
 
                 double? pssDuration = taskEntity.GetAttributeValue<double?>("msdyn_duration");
                 if (pssDuration.HasValue && !src.IsSummary)
@@ -964,6 +1008,16 @@ namespace ADC.MppImport.Services
             public int SourceDurationHours;
             public bool IsMilestone;
             public bool IsSummary;
+            // Custom fields from MPP (aliased Text/Date columns)
+            public string Comments;
+            public string Milestones;
+            public string DayCount;
+            public string Roles;
+            public string DelayCategory;
+            public string DelayDetail;
+            public string Baseline1;
+            public string Baseline2;
+            public string Baseline3;
         }
 
         #endregion

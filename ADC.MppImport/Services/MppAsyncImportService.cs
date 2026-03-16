@@ -90,6 +90,30 @@ namespace ADC.MppImport.Services
                 if (!dto.IsSummary && mppTask.Work != null && mppTask.Work.Value > 0)
                     dto.EffortHours = ConvertToHours(mppTask.Work);
 
+                // Custom fields from MPP (aliased Text/Date columns)
+                if (mppTask.CustomFields.Count > 0)
+                {
+                    object v;
+                    if (mppTask.CustomFields.TryGetValue("Comments", out v) && v != null)
+                        dto.Comments = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Milestones", out v) && v != null)
+                        dto.Milestones = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Day Count", out v) && v != null)
+                        dto.DayCount = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Roles", out v) && v != null)
+                        dto.Roles = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Delay Category", out v) && v != null)
+                        dto.DelayCategory = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Delay Detail", out v) && v != null)
+                        dto.DelayDetail = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Baseline 1", out v) && v != null)
+                        dto.Baseline1 = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Baseline 2", out v) && v != null)
+                        dto.Baseline2 = v.ToString();
+                    if (mppTask.CustomFields.TryGetValue("Baseline 3", out v) && v != null)
+                        dto.Baseline3 = v.ToString();
+                }
+
                 Guid preGen = Guid.NewGuid();
                 dto.PreGenGuid = preGen.ToString();
                 payload.TaskIdMap[dto.UniqueID] = dto.PreGenGuid;
@@ -858,6 +882,16 @@ namespace ADC.MppImport.Services
             var tasks = _service.RetrieveMultiple(query);
             _trace?.Trace("  Retrieved {0} project tasks for variance check", tasks.Entities.Count);
 
+            // Diagnostic: log first 5 DTO values to verify payload deserialization
+            int diagCount = 0;
+            foreach (var dto2 in payload.Tasks)
+            {
+                if (diagCount++ >= 5) break;
+                _trace?.Trace("  [DIAG] UID={0} Name={1} SrcDays={2} SrcHours={3} DurHours={4} IsMilestone={5} IsSummary={6}",
+                    dto2.UniqueID, dto2.Name, dto2.SourceDurationDays, dto2.SourceDurationHours,
+                    dto2.DurationHours, dto2.IsMilestone, dto2.IsSummary);
+            }
+
             int updated = 0;
             int skipped = 0;
             foreach (var taskEntity in tasks.Entities)
@@ -879,6 +913,26 @@ namespace ADC.MppImport.Services
                 taskUpdate["adc_sourcedurationdays"] = dto.SourceDurationDays;
                 taskUpdate["adc_sourcedurationhours"] = dto.SourceDurationHours;
                 taskUpdate["adc_issourcemilestone"] = dto.IsMilestone;
+
+                // Custom fields from MPP
+                if (!string.IsNullOrEmpty(dto.Comments))
+                    taskUpdate["adc_comments"] = dto.Comments;
+                if (!string.IsNullOrEmpty(dto.Milestones))
+                    taskUpdate["adc_milestones"] = dto.Milestones;
+                if (!string.IsNullOrEmpty(dto.DayCount))
+                    taskUpdate["adc_daycount"] = dto.DayCount;
+                if (!string.IsNullOrEmpty(dto.Roles))
+                    taskUpdate["adc_roles"] = dto.Roles;
+                if (!string.IsNullOrEmpty(dto.DelayCategory))
+                    taskUpdate["adc_delaycategory"] = dto.DelayCategory;
+                if (!string.IsNullOrEmpty(dto.DelayDetail))
+                    taskUpdate["adc_delaydetail"] = dto.DelayDetail;
+                if (!string.IsNullOrEmpty(dto.Baseline1))
+                    taskUpdate["adc_baseline1"] = dto.Baseline1;
+                if (!string.IsNullOrEmpty(dto.Baseline2))
+                    taskUpdate["adc_baseline2"] = dto.Baseline2;
+                if (!string.IsNullOrEmpty(dto.Baseline3))
+                    taskUpdate["adc_baseline3"] = dto.Baseline3;
 
                 // Compute variance
                 double? pssDuration = taskEntity.GetAttributeValue<double?>("msdyn_duration");

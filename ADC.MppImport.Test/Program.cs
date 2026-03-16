@@ -254,6 +254,11 @@ namespace ADC.MppImport.Test
                     Console.WriteLine("  [{0,3}] L{1} {2,-40} Start={3:d}  Dur={4,-18} {5,-8} Pred={6}{7}",
                         t.UniqueID, t.OutlineLevel, Trunc(t.Name, 40),
                         t.Start, durStr, parentStr, preds, activeStr);
+                    if (t.CustomFields.Count > 0)
+                    {
+                        foreach (var cf in t.CustomFields)
+                            Console.WriteLine("         CF: {0} = {1}", cf.Key, cf.Value);
+                    }
                 }
 
                 if (project.Resources.Count > 0)

@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using Microsoft.Xrm.Sdk;
-using Microsoft.Xrm.Sdk.Query;
 using ADC.MppImport.Services;
 
 namespace ADC.MppImport.Plugins
@@ -41,140 +39,29 @@ namespace ADC.MppImport.Plugins
             }
 
             Guid caseId = target.Id;
+            var caseImportService = new CaseImportService(service, tracingService);
 
             try
             {
+                // Check if template is set before delegating
                 var templateRef = target.GetAttributeValue<EntityReference>("adc_adccasetemplateid");
-                tracingService.Trace("CaseCreatePlugin: adc_casetemplate from Target = {0}",
-                    templateRef != null ? templateRef.Id.ToString() : "NULL");
-
                 if (templateRef == null)
                 {
-                    tracingService.Trace("CaseCreatePlugin: Not in Target, retrieving from DB...");
-                    var fullRecord = service.Retrieve("adc_case", caseId,
-                        new ColumnSet("adc_adccasetemplateid"));
-                    templateRef = fullRecord.GetAttributeValue<EntityReference>("adc_adccasetemplateid");
-                    tracingService.Trace("CaseCreatePlugin: adc_casetemplate from DB = {0}",
-                        templateRef != null ? templateRef.Id.ToString() : "NULL");
+                    tracingService.Trace("CaseCreatePlugin: No template in Target, will check DB via service...");
                 }
 
-                if (templateRef == null)
-                {
-                    tracingService.Trace("CaseCreatePlugin: No template set, exiting.");
-                    return;
-                }
-
-                byte[] mppBytes = DownloadFileColumn(service, tracingService, templateRef.Id,
-                    "adc_adccasetemplate", "adc_templatefile");
-
-                tracingService.Trace("CaseCreatePlugin: Downloaded MPP bytes = {0}",
-                    mppBytes != null ? mppBytes.Length.ToString() : "NULL");
-                if (mppBytes == null || mppBytes.Length == 0)
-                {
-                    tracingService.Trace("CaseCreatePlugin: No MPP file data, exiting.");
-                    return;
-                }
-
-                var caseRecord = service.Retrieve("adc_case", caseId,
-                    new ColumnSet("adc_name", "adc_casenumber", "createdby", "adc_originallodgementdate"));
-                string caseName = caseRecord.GetAttributeValue<string>("adc_name") ?? "ADC Case";
-                string caseNumber = caseRecord.GetAttributeValue<string>("adc_casenumber");
-                string projectName = !string.IsNullOrEmpty(caseNumber)
-                    ? string.Format("{0} - {1}", caseName, caseNumber)
-                    : caseName;
-
-                // Read Original Lodgement Date — try target first (set on form), fall back to retrieved record
-                DateTime? projectStartDate = target.GetAttributeValue<DateTime?>("adc_originallodgementdate")
-                    ?? caseRecord.GetAttributeValue<DateTime?>("adc_originallodgementdate");
-                tracingService.Trace("CaseCreatePlugin: Original Lodgement Date raw = {0}",
-                    projectStartDate.HasValue ? projectStartDate.Value.ToString("o") : "(not set)");
-
-                Guid? initiatingUserId = null;
-                var createdBy = caseRecord.GetAttributeValue<EntityReference>("createdby");
-                if (createdBy != null)
-                    initiatingUserId = createdBy.Id;
-                if (!initiatingUserId.HasValue)
-                    initiatingUserId = context.InitiatingUserId;
-
-                var projectEntity = new Entity("msdyn_project");
-                projectEntity["msdyn_subject"] = projectName;
-                projectEntity["adc_parentadccase"] = new EntityReference("adc_case", caseId);
-                tracingService.Trace("CaseCreatePlugin: Creating project '{0}'...", projectName);
-                Guid projectId = service.Create(projectEntity);
-                tracingService.Trace("CaseCreatePlugin: Project created: {0}", projectId);
-
-                var caseUpdate = new Entity("adc_case", caseId);
-                caseUpdate["adc_projectid"] = new EntityReference("msdyn_project", projectId);
-                caseUpdate["adc_importstatus"] = new OptionSetValue(1); // Processing
-                caseUpdate["adc_importmessage"] = "Creating project and starting import...";
-                service.Update(caseUpdate);
-
-                tracingService.Trace("CaseCreatePlugin: Sleeping 10s for project commit...");
-                System.Threading.Thread.Sleep(10000);
-                tracingService.Trace("CaseCreatePlugin: Calling InitializeJob...");
-                var importService = new MppAsyncImportService(service, tracingService);
-                Guid jobId = importService.InitializeJob(
-                    mppBytes, projectId, templateRef.Id, projectStartDate,
-                    caseId: caseId, initiatingUserId: initiatingUserId);
+                Guid jobId = caseImportService.RunImportFromPlugin(caseId, target, context.InitiatingUserId);
                 tracingService.Trace("CaseCreatePlugin: Import job created: {0}", jobId);
-
+            }
+            catch (InvalidPluginExecutionException ex) when (ex.Message.Contains("No case template"))
+            {
+                tracingService.Trace("CaseCreatePlugin: No template set, exiting gracefully.");
+                return;
             }
             catch (Exception ex)
             {
                 tracingService.Trace("CaseCreatePlugin: EXCEPTION: {0}\n{1}", ex.Message, ex.StackTrace);
-                try
-                {
-                    var failUpdate = new Entity("adc_case", caseId);
-                    failUpdate["adc_importstatus"] = new OptionSetValue(4); // Failed
-                    var errMsg = "Import setup failed: " + ex.Message;
-                    failUpdate["adc_importmessage"] = errMsg.Length > 100 ? errMsg.Substring(0, 97) + "..." : errMsg;
-                    service.Update(failUpdate);
-                }
-                catch (Exception updateEx)
-                {
-                    tracingService.Trace("Could not update case to failed state: {0}", updateEx.Message);
-                }
-            }
-        }
-
-        private byte[] DownloadFileColumn(IOrganizationService service, ITracingService trace,
-            Guid recordId, string entityName, string fileAttributeName)
-        {
-            try
-            {
-                var initRequest = new OrganizationRequest("InitializeFileBlocksDownload");
-                initRequest["Target"] = new EntityReference(entityName, recordId);
-                initRequest["FileAttributeName"] = fileAttributeName;
-
-                var initResponse = service.Execute(initRequest);
-                string fileContinuationToken = (string)initResponse["FileContinuationToken"];
-                long fileSize = (long)initResponse["FileSizeInBytes"];
-
-                if (fileSize == 0) return null;
-
-                var allBytes = new List<byte>();
-                long offset = 0;
-                const long blockSize = 4 * 1024 * 1024; // 4MB blocks
-
-                while (offset < fileSize)
-                {
-                    var downloadRequest = new OrganizationRequest("DownloadBlock");
-                    downloadRequest["FileContinuationToken"] = fileContinuationToken;
-                    downloadRequest["BlockLength"] = blockSize;
-                    downloadRequest["Offset"] = offset;
-
-                    var downloadResponse = service.Execute(downloadRequest);
-                    byte[] blockData = (byte[])downloadResponse["Data"];
-                    allBytes.AddRange(blockData);
-                    offset += blockData.Length;
-                }
-
-                return allBytes.ToArray();
-            }
-            catch (Exception ex)
-            {
-                trace.Trace("Error downloading file: {0}", ex.Message);
-                return null;
+                caseImportService.MarkCaseFailed(caseId, ex.Message);
             }
         }
     }

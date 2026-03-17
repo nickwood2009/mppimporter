@@ -692,6 +692,7 @@ namespace ADC.MppImport.MppReader.Mpp
                         taskMap[uniqueID] = loop;
                 }
 
+                int cfDiagDone = 0;
                 foreach (var entry in taskMap)
                 {
                     int uniqueID = entry.Key;
@@ -819,6 +820,26 @@ namespace ADC.MppImport.MppReader.Mpp
                     // Read custom fields from VarData
                     if (taskVarData != null && customFields.Count > 0)
                     {
+                        // Diagnostic: dump VarMeta types vs FieldMap keys for first non-null task
+                        if (cfDiagDone < 1)
+                        {
+                            var varMetaTypes = taskVarData.VarMeta.GetTypes(uniqueID);
+                            m_file.DiagnosticMessages.Add(string.Format(
+                                "  [CF-KEY] UID={0} VarMeta has {1} types: {2}",
+                                uniqueID, varMetaTypes.Count,
+                                string.Join(", ", varMetaTypes.Select(t => string.Format("0x{0:X8}", t)))));
+                            foreach (var cf2 in customFields)
+                            {
+                                string n2;
+                                if (!aliases.TryGetValue(cf2.Key, out n2))
+                                    n2 = GetStandardCustomFieldName(cf2.Key);
+                                m_file.DiagnosticMessages.Add(string.Format(
+                                    "  [CF-KEY] Field \"{0}\" idx={1} VarDataKey=0x{2:X8} cat=0x{3:X2} inMeta={4}",
+                                    n2, cf2.Key, cf2.Value.VarDataKey, cf2.Value.Category,
+                                    varMetaTypes.Contains(cf2.Value.VarDataKey)));
+                            }
+                            cfDiagDone++;
+                        }
                         foreach (var cf in customFields)
                         {
                             int cfIdx = cf.Key;

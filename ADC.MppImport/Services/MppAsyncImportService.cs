@@ -46,6 +46,10 @@ namespace ADC.MppImport.Services
             ProjectFile project = reader.Read(mppBytes);
             _trace?.Trace("Parsed: {0} tasks, {1} resources", project.Tasks.Count, project.Resources.Count);
 
+            // Dump reader diagnostics (CF-KEY, alias parsing, etc.)
+            foreach (var msg in project.DiagnosticMessages)
+                _trace?.Trace("  {0}", msg);
+
             if (project.Tasks.Count == 0)
                 throw new InvalidPluginExecutionException("No tasks found in MPP file.");
 

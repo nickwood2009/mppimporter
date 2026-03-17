@@ -89,9 +89,7 @@ ADC.CaseTemplateForm = ADC.CaseTemplateForm || {};
     function expandTemplateProjectGrid() {
         var pollId = setInterval(function () {
             var targetDiv = parent.window.document.querySelector(
-                    'div[id^="tab-sectionadc_templateproject1_modelFormComponent_0_modelFormComponent_"]') ||
-                parent.window.document.querySelector(
-                    'div[id^="tab-sectionadc_templateproject_modelFormComponent_0_modelFormComponent_"]');
+                'div[id*="adc_templateproject"][id*="modelFormComponent"]');
 
             if (targetDiv) {
                 targetDiv.style.height = "100%";

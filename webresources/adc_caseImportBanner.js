@@ -84,12 +84,15 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
         // If already completed/failed, don't restart polling
         if (status === STATUS.COMPLETED || status === STATUS.COMPLETED_WARNINGS || status === STATUS.FAILED) return;
 
-        // Show immediate feedback and start polling
-        _startTime = new Date();
-        formContext.ui.setFormNotification(
-            "Project setup starting — please wait...", "INFO", NOTIFICATION_ID);
-        startTicker(formContext);
-        startPolling(formContext);
+        // Delay banner display until after the post-save form re-render,
+        // otherwise Dynamics clears the notification during its re-render cycle.
+        setTimeout(function () {
+            _startTime = new Date();
+            formContext.ui.setFormNotification(
+                "Project setup starting — please wait...", "INFO", NOTIFICATION_ID);
+            startTicker(formContext);
+            startPolling(formContext);
+        }, 2000);
     };
 
     /**
@@ -168,9 +171,12 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
                                 status === STATUS.COMPLETED_WARNINGS ||
                                 status === STATUS.FAILED) {
                                 stopPolling();
+                            } else if (status === STATUS.PROCESSING) {
+                                // Server status stuck at Processing — check if the
+                                // linked project copy has actually finished
+                                checkProjectCopyStatus(formContext);
                             }
-                            // Keep polling if null (waiting for async plugin),
-                            // QUEUED, or PROCESSING
+                            // Keep polling if null (waiting for async plugin) or QUEUED
                         }
                     },
                     function () {
@@ -182,6 +188,64 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
                 stopPolling();
             }
         }, POLL_INTERVAL_MS);
+    }
+
+    /**
+     * Checks if the linked project's copy operation has completed by reading
+     * the project's statuscode via Web API. If Active (1), marks the case as
+     * Completed so the banner updates without waiting for a server-side process.
+     */
+    function checkProjectCopyStatus(formContext) {
+        var projectAttr = formContext.getAttribute("adc_projectid");
+        if (!projectAttr) return;
+        var projectVal = projectAttr.getValue();
+        if (!projectVal || projectVal.length === 0) return;
+
+        var projectId = projectVal[0].id.replace(/[{}]/g, "");
+
+        Xrm.WebApi.retrieveRecord("msdyn_project", projectId, "?$select=statuscode").then(
+            function (result) {
+                var statusCode = result.statuscode;
+                // statuscode 1 = Active (copy done)
+                if (statusCode === 1) {
+                    // Update case import status to Completed
+                    var caseId = formContext.data.entity.getId().replace(/[{}]/g, "");
+                    var updateData = {
+                        adc_importstatus: STATUS.COMPLETED,
+                        adc_importmessage: "Project cloned successfully."
+                    };
+                    Xrm.WebApi.updateRecord("adc_case", caseId, updateData).then(
+                        function () {
+                            // Refresh form to pick up the change
+                            formContext.data.refresh(false).then(function () {
+                                updateBanner(formContext);
+                                stopPolling();
+                            });
+                        },
+                        function () { /* non-fatal */ }
+                    );
+                }
+                // If statuscode == 192350000 (copy failed), mark as failed
+                else if (statusCode === 192350000) {
+                    var caseId2 = formContext.data.entity.getId().replace(/[{}]/g, "");
+                    var failData = {
+                        adc_importstatus: STATUS.FAILED,
+                        adc_importmessage: "Project copy failed. Check PSS Error Logs."
+                    };
+                    Xrm.WebApi.updateRecord("adc_case", caseId2, failData).then(
+                        function () {
+                            formContext.data.refresh(false).then(function () {
+                                updateBanner(formContext);
+                                stopPolling();
+                            });
+                        },
+                        function () { /* non-fatal */ }
+                    );
+                }
+                // Otherwise still copying — keep polling
+            },
+            function () { /* Web API call failed — keep polling */ }
+        );
     }
 
     /**

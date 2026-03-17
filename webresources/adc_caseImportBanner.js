@@ -216,7 +216,6 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
                     };
                     Xrm.WebApi.updateRecord("adc_case", caseId, updateData).then(
                         function () {
-                            // Refresh form to pick up the change
                             formContext.data.refresh(false).then(function () {
                                 updateBanner(formContext);
                                 stopPolling();
@@ -224,6 +223,8 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
                         },
                         function () { /* non-fatal */ }
                     );
+                    sendNotification("Project Clone Complete",
+                        "Project cloned successfully.", 100000001, caseId);
                 }
                 // If statuscode == 192350000 (copy failed), mark as failed
                 else if (statusCode === 192350000) {
@@ -241,6 +242,8 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
                         },
                         function () { /* non-fatal */ }
                     );
+                    sendNotification("Project Clone Failed",
+                        "Project copy failed. Check PSS Error Logs.", 100000002, caseId2);
                 }
                 // Otherwise still copying — keep polling
             },
@@ -292,6 +295,42 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
             return mins + "m " + secs + "s";
         }
         return secs + "s";
+    }
+
+    /**
+     * Sends an appnotification record to the current user via Web API.
+     * icontype: 100000000=Info, 100000001=Success, 100000002=Failure, 100000003=Warning
+     */
+    function sendNotification(title, body, iconType, caseId) {
+        try {
+            var userId = Xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "");
+            var record = {
+                title: title,
+                body: body,
+                "ownerid@odata.bind": "/systemusers(" + userId + ")",
+                icontype: iconType,
+                toasttype: 200000000 // Timed (shows toast)
+            };
+
+            if (caseId) {
+                record.data = JSON.stringify({
+                    actions: [{
+                        title: "Open Case",
+                        data: {
+                            url: "?pagetype=entityrecord&etn=adc_case&id=" + caseId,
+                            navigationTarget: "dialog"
+                        }
+                    }]
+                });
+            }
+
+            Xrm.WebApi.createRecord("appnotification", record).then(
+                function () { /* sent */ },
+                function () { /* non-fatal */ }
+            );
+        } catch (e) {
+            // non-fatal
+        }
     }
 
     /**

@@ -125,7 +125,21 @@ namespace ADC.MppImport.Workflows
                 return;
             }
 
-            // 3. Poll for completion
+            // 3. Poll for completion (async workflows only — synchronous/real-time
+            //    workflows run inside a transaction where Thread.Sleep is not allowed)
+            var wfContext = executionContext.GetExtension<IWorkflowContext>();
+            bool isSynchronous = wfContext != null && wfContext.Mode == 1; // 0=Async, 1=Synchronous
+
+            if (isSynchronous)
+            {
+                TracingService.Trace("CloneProject: Running in real-time workflow — skipping poll. Copy will complete async.");
+                NewProject.Set(executionContext, new EntityReference("msdyn_project", targetProjectId));
+                Success.Set(executionContext, true);
+                ResultMessage.Set(executionContext, string.Format(
+                    "Project copy initiated for '{0}'. Copy is running in the background.", targetProjectName));
+                return;
+            }
+
             TracingService.Trace("CloneProject: Polling for copy completion...");
             bool copySucceeded = false;
             string finalMessage = "Copy timed out after polling.";

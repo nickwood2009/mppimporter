@@ -5,9 +5,9 @@
  * Reads adc_importstatus (optionset) and adc_importmessage (string) fields
  * and shows/hides a setFormNotification banner accordingly.
  *
- * Register as onLoad event handler on the adc_adccasetemplate main form.
- * Function: ADC.CaseTemplateImportBanner.onLoad
- * Pass execution context: Yes
+ * Register on the adc_adccasetemplate main form:
+ *   1. onLoad:   ADC.CaseTemplateImportBanner.onLoad   (pass execution context)
+ *   2. onChange:  ADC.CaseTemplateImportBanner.onChange  (on adc_importstatus, pass execution context)
  *
  * Status values:
  *   0 = Queued
@@ -51,6 +51,23 @@ ADC.CaseTemplateImportBanner = ADC.CaseTemplateImportBanner || {};
 
         if (status === STATUS.QUEUED || status === STATUS.PROCESSING) {
             // Import already in progress - poll immediately
+            startPolling(formContext);
+        }
+    };
+
+    /**
+     * onChange handler for adc_importstatus - detects when a real-time workflow
+     * updates the status and kicks off polling + banner display.
+     */
+    ADC.CaseTemplateImportBanner.onChange = function (executionContext) {
+        var formContext = executionContext.getFormContext();
+
+        updateBanner(formContext);
+
+        var statusAttr = formContext.getAttribute("adc_importstatus");
+        var status = statusAttr ? statusAttr.getValue() : null;
+
+        if (status === STATUS.QUEUED || status === STATUS.PROCESSING) {
             startPolling(formContext);
         }
     };

@@ -113,15 +113,8 @@ namespace ADC.MppImport.Services
                         {
                             string valStr = cf.Value != null ? cf.Value.ToString() : "(null)";
                             string typStr = cf.Value != null ? cf.Value.GetType().Name : "?";
-                            // Also log hex for short strings to detect encoding issues
-                            string hexStr = "";
-                            if (cf.Value is string && ((string)cf.Value).Length <= 30)
-                            {
-                                byte[] bytes = System.Text.Encoding.Unicode.GetBytes((string)cf.Value);
-                                hexStr = " Hex=" + BitConverter.ToString(bytes);
-                            }
-                            _trace?.Trace("    Key=\"{0}\" Type={1} Value=\"{2}\"{3}",
-                                cf.Key, typStr, valStr, hexStr);
+                            _trace?.Trace("    Key=\"{0}\" Type={1} Value=\"{2}\"",
+                                cf.Key, typStr, valStr);
                         }
                     }
                     object v;
@@ -1864,10 +1857,8 @@ namespace ADC.MppImport.Services
                 if (_optSetWarnCount < 6)
                 {
                     _optSetWarnCount++;
-                    byte[] bytes = System.Text.Encoding.Unicode.GetBytes(mppValue);
-                    string hex = BitConverter.ToString(bytes);
-                    _trace?.Trace("  WARNING: No OptionSet match for {0}='{1}' Len={2} Hex={3} (available: {4})",
-                        fieldName, mppValue, mppValue.Length, hex, string.Join(", ", labelMap.Keys));
+                    _trace?.Trace("  WARNING: No OptionSet match for {0}='{1}' (available: {2})",
+                        fieldName, mppValue, string.Join(", ", labelMap.Keys));
                 }
             }
         }

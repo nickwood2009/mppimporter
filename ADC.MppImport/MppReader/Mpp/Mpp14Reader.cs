@@ -393,6 +393,46 @@ namespace ADC.MppImport.MppReader.Mpp
 
                 int itemCount = taskFixedMeta.AdjustedItemCount;
 
+                // Build lookup table (GUID → text) from TBkndOutlCode for resolving
+                // custom field values that store GUID references instead of direct text
+                var lookupGuidToText = new Dictionary<string, string>();
+                CFStorage outlCodeDir = MppFileReader.GetStorage(m_projectDir, "TBkndOutlCode");
+                if (outlCodeDir != null)
+                {
+                    byte[] ocVarMetaBuf = MppFileReader.GetStreamData(outlCodeDir, "VarMeta");
+                    byte[] ocVar2DataBuf = MppFileReader.GetStreamData(outlCodeDir, "Var2Data");
+                    byte[] ocFixed2Buf = MppFileReader.GetStreamData(outlCodeDir, "Fixed2Data");
+                    if (ocVarMetaBuf != null && ocVar2DataBuf != null && ocFixed2Buf != null)
+                    {
+                        var ocVarMeta = new VarMeta12(ocVarMetaBuf);
+                        var ocVarData = new Var2Data(ocVarMeta, ocVar2DataBuf);
+                        // Fixed2Data: 34 bytes per entry (16-byte entry GUID + 16-byte parent GUID + 2-byte flags)
+                        // First 3 entries are field headers; value entries start at index 3
+                        // Value entry at index E corresponds to VarData UID = E - 3
+                        const int ENTRY_SIZE = 34;
+                        int totalEntries = ocFixed2Buf.Length / ENTRY_SIZE;
+                        int valueStartIdx = 3; // skip field header entries
+                        for (int e = valueStartIdx; e < totalEntries; e++)
+                        {
+                            int entryOffset = e * ENTRY_SIZE;
+                            if (entryOffset + 16 > ocFixed2Buf.Length) break;
+                            // Extract 16-byte GUID from the entry
+                            string guidKey = BitConverter.ToString(ocFixed2Buf, entryOffset, 16);
+                            // The corresponding VarData UID
+                            int ocUid = e - valueStartIdx;
+                            // Read text value from VarData (type 0x16400016)
+                            string text = ocVarData.GetUnicodeString(ocUid, 0x16400016);
+                            if (!string.IsNullOrEmpty(text) && !string.IsNullOrEmpty(guidKey))
+                            {
+                                lookupGuidToText[guidKey] = text;
+                            }
+                        }
+                        m_file.DiagnosticMessages.Add(string.Format(
+                            "  [OUTLCODE] Built lookup table: {0} GUID→text entries from {1} Fixed2Data entries",
+                            lookupGuidToText.Count, totalEntries));
+                    }
+                }
+
                 // Diagnostic: Active field map info
                 var activeFieldItem = fm.GetFieldItem((int)TaskFieldIndex.Active);
                 if (activeFieldItem != null)
@@ -424,27 +464,13 @@ namespace ADC.MppImport.MppReader.Mpp
                 {
                     var taskProps = new Props14(taskPropsData);
                     aliases = ReadTaskFieldAliases(taskProps);
-                    m_file.DiagnosticMessages.Add(string.Format("TBkndTask/Props: {0} bytes, aliases from standard key: {1}",
-                        taskPropsData.Length, aliases.Count));
 
                     // If standard key not found, try CUSTOM_FIELDS key
                     if (aliases.Count == 0)
                     {
                         byte[] cfData = taskProps.GetByteArray(Props.CUSTOM_FIELDS);
                         if (cfData != null && cfData.Length > 0)
-                        {
-                            m_file.DiagnosticMessages.Add(string.Format(
-                                "  TBkndTask CUSTOM_FIELDS: {0} bytes", cfData.Length));
-                            int dumpLen = Math.Min(cfData.Length, 200);
-                            m_file.DiagnosticMessages.Add(string.Format("  Hex: {0}",
-                                BitConverter.ToString(cfData, 0, dumpLen)));
                             aliases = TryParseAliasBlock(cfData);
-                            if (aliases.Count > 0)
-                            {
-                                m_file.DiagnosticMessages.Add(string.Format(
-                                    "  Aliases found: {0} entries", aliases.Count));
-                            }
-                        }
                     }
                 }
                 // Fallback: try project props and root props
@@ -466,194 +492,6 @@ namespace ADC.MppImport.MppReader.Mpp
                     m_file.DiagnosticMessages.Add("Task field aliases: NONE");
                 }
 
-                // Diagnostic: check other props that may contain custom field names
-                byte[] customFieldsProp = m_projectProps.GetByteArray(Props.CUSTOM_FIELDS);
-                m_file.DiagnosticMessages.Add(string.Format("CUSTOM_FIELDS prop: {0}",
-                    customFieldsProp != null ? string.Format("{0} bytes", customFieldsProp.Length) : "NOT FOUND"));
-                byte[] ecfMapProp = m_projectProps.GetByteArray(Props.ENTERPRISE_CUSTOM_FIELD_MAP);
-                m_file.DiagnosticMessages.Add(string.Format("ENTERPRISE_CUSTOM_FIELD_MAP prop: {0}",
-                    ecfMapProp != null ? string.Format("{0} bytes", ecfMapProp.Length) : "NOT FOUND"));
-
-                // Dump ECF map raw hex if present
-                if (ecfMapProp != null && ecfMapProp.Length > 0)
-                {
-                    m_file.DiagnosticMessages.Add(string.Format("  ECF raw hex ({0} bytes): {1}",
-                        ecfMapProp.Length, BitConverter.ToString(ecfMapProp, 0, ecfMapProp.Length)));
-                }
-
-                // Also check TASK_FIELD_NAME_ALIASES raw data in both props
-                byte[] aliasRawData = m_projectProps.GetByteArray(Props.TASK_FIELD_NAME_ALIASES);
-                m_file.DiagnosticMessages.Add(string.Format("TASK_FIELD_NAME_ALIASES (project): {0}",
-                    aliasRawData != null ? string.Format("{0} bytes", aliasRawData.Length) : "NOT FOUND"));
-                byte[] aliasRawRoot = m_rootProps != null ? m_rootProps.GetByteArray(Props.TASK_FIELD_NAME_ALIASES) : null;
-                m_file.DiagnosticMessages.Add(string.Format("TASK_FIELD_NAME_ALIASES (root): {0}",
-                    aliasRawRoot != null ? string.Format("{0} bytes", aliasRawRoot.Length) : "NOT FOUND"));
-                byte[] aliasToShow = aliasRawData ?? aliasRawRoot;
-                if (aliasToShow != null && aliasToShow.Length > 0)
-                {
-                    int dumpAliasLen = Math.Min(aliasToShow.Length, 200);
-                    m_file.DiagnosticMessages.Add(string.Format("  Alias raw hex: {0}",
-                        BitConverter.ToString(aliasToShow, 0, dumpAliasLen)));
-                }
-
-                // Dump TASK_FIELD_ATTRIBUTES data (this is where aliases may be stored)
-                byte[] fieldAttrData = m_projectProps.GetByteArray(Props.TASK_FIELD_ATTRIBUTES);
-                if (fieldAttrData != null && fieldAttrData.Length > 0)
-                {
-                    m_file.DiagnosticMessages.Add(string.Format("TASK_FIELD_ATTRIBUTES: {0} bytes", fieldAttrData.Length));
-                    // Dump full hex in chunks
-                    for (int dOff = 0; dOff < fieldAttrData.Length; dOff += 64)
-                    {
-                        int chunk = Math.Min(64, fieldAttrData.Length - dOff);
-                        m_file.DiagnosticMessages.Add(string.Format("  @{0:D4}: {1}",
-                            dOff, BitConverter.ToString(fieldAttrData, dOff, chunk)));
-                    }
-                }
-
-                // Search OLE2 streams in project directory for alias data
-                byte[] searchBytes = System.Text.Encoding.Unicode.GetBytes("Comments");
-                m_file.DiagnosticMessages.Add("--- Searching OLE2 streams for alias data ---");
-                try
-                {
-                    m_projectDir.VisitEntries(item =>
-                    {
-                        if (!item.IsStorage)
-                        {
-                            try
-                            {
-                                byte[] streamData = ((CFStream)item).GetData();
-                                m_file.DiagnosticMessages.Add(string.Format("  Stream: \"{0}\" Size={1}", item.Name, streamData?.Length ?? 0));
-                                if (streamData != null && streamData.Length >= searchBytes.Length)
-                                {
-                                    for (int si = 0; si <= streamData.Length - searchBytes.Length; si++)
-                                    {
-                                        bool found = true;
-                                        for (int sj = 0; sj < searchBytes.Length; sj++)
-                                        {
-                                            if (streamData[si + sj] != searchBytes[sj]) { found = false; break; }
-                                        }
-                                        if (found)
-                                        {
-                                            m_file.DiagnosticMessages.Add(string.Format(
-                                                "    *** ALIAS in stream \"{0}\" at offset {1}", item.Name, si));
-                                            int hexStart = Math.Max(0, si - 80);
-                                            int hexLen = Math.Min(streamData.Length - hexStart, 300);
-                                            m_file.DiagnosticMessages.Add(string.Format("    Hex: {0}",
-                                                BitConverter.ToString(streamData, hexStart, hexLen)));
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                            catch { }
-                        }
-                        else
-                        {
-                            m_file.DiagnosticMessages.Add(string.Format("  Storage: \"{0}\"", item.Name));
-                        }
-                    }, false);
-                    // Also check sub-storages
-                    m_projectDir.VisitEntries(item =>
-                    {
-                        if (item.IsStorage)
-                        {
-                            try
-                            {
-                                var sub = (CFStorage)item;
-                                sub.VisitEntries(subItem =>
-                                {
-                                    if (!subItem.IsStorage)
-                                    {
-                                        try
-                                        {
-                                            byte[] streamData = ((CFStream)subItem).GetData();
-                                            if (streamData != null && streamData.Length >= searchBytes.Length)
-                                            {
-                                                for (int si = 0; si <= streamData.Length - searchBytes.Length; si++)
-                                                {
-                                                    bool found = true;
-                                                    for (int sj = 0; sj < searchBytes.Length; sj++)
-                                                    {
-                                                        if (streamData[si + sj] != searchBytes[sj]) { found = false; break; }
-                                                    }
-                                                    if (found)
-                                                    {
-                                                        m_file.DiagnosticMessages.Add(string.Format(
-                                                            "    *** ALIAS in {0}/{1} at offset {2}", item.Name, subItem.Name, si));
-                                                        break;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        catch { }
-                                    }
-                                }, false);
-                            }
-                            catch { }
-                        }
-                    }, false);
-                }
-                catch (Exception ex)
-                {
-                    m_file.DiagnosticMessages.Add(string.Format("  OLE2 enumeration error: {0}", ex.Message));
-                }
-
-                // Try to parse custom field definitions from CUSTOM_FIELDS prop
-                if (customFieldsProp != null && customFieldsProp.Length > 0)
-                {
-                    try
-                    {
-                        int cfOffset = 0;
-                        int cfCount = 0;
-                        while (cfOffset + 20 < customFieldsProp.Length && cfCount < 50)
-                        {
-                            // Each custom field entry: GUID (16 bytes), then field type (4 bytes), then name string
-                            Guid cfGuid = new Guid(
-                                BitConverter.ToInt32(customFieldsProp, cfOffset),
-                                BitConverter.ToInt16(customFieldsProp, cfOffset + 4),
-                                BitConverter.ToInt16(customFieldsProp, cfOffset + 6),
-                                customFieldsProp[cfOffset + 8], customFieldsProp[cfOffset + 9],
-                                customFieldsProp[cfOffset + 10], customFieldsProp[cfOffset + 11],
-                                customFieldsProp[cfOffset + 12], customFieldsProp[cfOffset + 13],
-                                customFieldsProp[cfOffset + 14], customFieldsProp[cfOffset + 15]);
-                            int cfTypeId = ByteArrayHelper.GetInt(customFieldsProp, cfOffset + 16);
-                            int cfFieldIdx = cfTypeId & 0x0000FFFF;
-
-                            // Try to read name string after the type
-                            string cfName = null;
-                            if (cfOffset + 24 < customFieldsProp.Length)
-                            {
-                                int nameLen = ByteArrayHelper.GetInt(customFieldsProp, cfOffset + 20);
-                                if (nameLen > 0 && nameLen < 500 && cfOffset + 24 + nameLen * 2 <= customFieldsProp.Length)
-                                {
-                                    cfName = System.Text.Encoding.Unicode.GetString(customFieldsProp, cfOffset + 24, nameLen * 2);
-                                    cfOffset += 24 + nameLen * 2;
-                                }
-                                else
-                                {
-                                    cfOffset += 24;
-                                }
-                            }
-                            else
-                            {
-                                cfOffset += 20;
-                            }
-
-                            m_file.DiagnosticMessages.Add(string.Format("  CF[{0}]: GUID={1} TypeId=0x{2:X8} FieldIdx={3} Name=\"{4}\"",
-                                cfCount, cfGuid, cfTypeId, cfFieldIdx, cfName ?? "(null)"));
-                            cfCount++;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        m_file.DiagnosticMessages.Add(string.Format("  CF parse error: {0}", ex.Message));
-                    }
-
-                    // Also dump first 200 bytes as hex for manual analysis
-                    int dumpLen = Math.Min(customFieldsProp.Length, 200);
-                    m_file.DiagnosticMessages.Add(string.Format("  CF raw hex ({0} bytes): {1}",
-                        dumpLen, BitConverter.ToString(customFieldsProp, 0, dumpLen)));
-                }
 
                 // Identify custom fields to read (VarData string, int, double, date types)
                 var customFields = new List<KeyValuePair<int, FieldItem>>();
@@ -692,7 +530,6 @@ namespace ADC.MppImport.MppReader.Mpp
                         taskMap[uniqueID] = loop;
                 }
 
-                int cfDiagDone = 0;
                 foreach (var entry in taskMap)
                 {
                     int uniqueID = entry.Key;
@@ -820,26 +657,6 @@ namespace ADC.MppImport.MppReader.Mpp
                     // Read custom fields from VarData
                     if (taskVarData != null && customFields.Count > 0)
                     {
-                        // Diagnostic: dump VarMeta types vs FieldMap keys for first non-null task
-                        if (cfDiagDone < 1)
-                        {
-                            var varMetaTypes = taskVarData.VarMeta.GetTypes(uniqueID);
-                            m_file.DiagnosticMessages.Add(string.Format(
-                                "  [CF-KEY] UID={0} VarMeta has {1} types: {2}",
-                                uniqueID, varMetaTypes.Count,
-                                string.Join(", ", varMetaTypes.Select(t => string.Format("0x{0:X8}", t)))));
-                            foreach (var cf2 in customFields)
-                            {
-                                string n2;
-                                if (!aliases.TryGetValue(cf2.Key, out n2))
-                                    n2 = GetStandardCustomFieldName(cf2.Key);
-                                m_file.DiagnosticMessages.Add(string.Format(
-                                    "  [CF-KEY] Field \"{0}\" idx={1} VarDataKey=0x{2:X8} cat=0x{3:X2} inMeta={4}",
-                                    n2, cf2.Key, cf2.Value.VarDataKey, cf2.Value.Category,
-                                    varMetaTypes.Contains(cf2.Value.VarDataKey)));
-                            }
-                            cfDiagDone++;
-                        }
                         foreach (var cf in customFields)
                         {
                             int cfIdx = cf.Key;
@@ -852,8 +669,32 @@ namespace ADC.MppImport.MppReader.Mpp
                             switch (cf.Value.Category)
                             {
                                 case 0x08: // string
-                                    string s = taskVarData.GetUnicodeString(uniqueID, varKey);
-                                    if (!string.IsNullOrEmpty(s)) value = s;
+                                    // First get raw bytes to detect lookup table GUID references
+                                    byte[] rawCf = taskVarData.GetByteArray(uniqueID, varKey);
+                                    if (rawCf != null && rawCf.Length >= 22 && rawCf[0] == 0x01)
+                                    {
+                                        // Lookup table reference: [01][07][4-byte][16-byte GUID][...]
+                                        // Extract 16-byte GUID from bytes 6-21
+                                        string guidKey = BitConverter.ToString(rawCf, 6, 16);
+                                        string resolved;
+                                        if (lookupGuidToText.TryGetValue(guidKey, out resolved))
+                                        {
+                                            value = resolved;
+                                        }
+                                        else
+                                        {
+                                            m_file.DiagnosticMessages.Add(string.Format(
+                                                "  [CF-LUT-MISS] UID={0} \"{1}\" guidKey={2} (not in lookup table)",
+                                                uniqueID, cfName, guidKey));
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // Normal text value
+                                        string s = rawCf != null ? MppUtility.GetUnicodeString(rawCf, 0) : null;
+                                        if (!string.IsNullOrEmpty(s))
+                                            value = s;
+                                    }
                                     break;
                                 case 0x03: // int/duration
                                     int iv = taskVarData.GetInt(uniqueID, varKey);

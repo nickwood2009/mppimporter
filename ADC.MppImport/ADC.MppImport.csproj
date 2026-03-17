@@ -98,6 +98,7 @@
     <Compile Include="Workflows\StartMppImportActivity.cs" />
     <Compile Include="Workflows\CloneProjectActivity.cs" />
     <Compile Include="Workflows\ImportCaseActivity.cs" />
+    <Compile Include="Workflows\ImportTemplateActivity.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

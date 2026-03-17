@@ -109,6 +109,98 @@ namespace ADC.MppImport.Services
         }
 
         /// <summary>
+        /// Runs the template import process: downloads MPP from the template record,
+        /// creates a template project (adc_istemplate = true), links it to the template,
+        /// and starts the async import. No adc_case is involved.
+        /// </summary>
+        /// <param name="templateId">The adc_adccasetemplate record ID.</param>
+        /// <param name="initiatingUserIdOverride">Optional initiating user.</param>
+        /// <returns>The created import job ID.</returns>
+        public Guid RunTemplateImport(Guid templateId, Guid? initiatingUserIdOverride = null)
+        {
+            _trace?.Trace("CaseImportService: RunTemplateImport templateId={0}", templateId);
+
+            // 1. Retrieve template record
+            var templateRecord = _service.Retrieve("adc_adccasetemplate", templateId,
+                new ColumnSet("adc_name"));
+            string templateName = templateRecord.GetAttributeValue<string>("adc_name") ?? "Case Template";
+
+            // 2. Download MPP file
+            byte[] mppBytes = DownloadFileColumn(templateId, "adc_adccasetemplate", "adc_templatefile");
+            _trace?.Trace("CaseImportService: Downloaded MPP bytes = {0}",
+                mppBytes != null ? mppBytes.Length.ToString() : "NULL");
+
+            if (mppBytes == null || mppBytes.Length == 0)
+                throw new InvalidPluginExecutionException("No MPP file found on the case template record.");
+
+            // 3. Update template status to Processing
+            try
+            {
+                var templateUpdate = new Entity("adc_adccasetemplate", templateId);
+                templateUpdate["adc_importstatus"] = new OptionSetValue(1); // Processing
+                templateUpdate["adc_importmessage"] = "Creating template project and starting import...";
+                _service.Update(templateUpdate);
+            }
+            catch (Exception ex)
+            {
+                _trace?.Trace("CaseImportService: Failed to set template import status (non-fatal): {0}", ex.Message);
+            }
+
+            // 4. Create template project
+            string projectName = templateName + " [Template]";
+            var projectEntity = new Entity("msdyn_project");
+            projectEntity["msdyn_subject"] = projectName;
+            projectEntity["adc_istemplate"] = true;
+            _trace?.Trace("CaseImportService: Creating template project '{0}'...", projectName);
+            Guid projectId = _service.Create(projectEntity);
+            _trace?.Trace("CaseImportService: Template project created: {0}", projectId);
+
+            // 5. Link project back to template
+            try
+            {
+                var templateUpdate = new Entity("adc_adccasetemplate", templateId);
+                templateUpdate["adc_templateproject"] = new EntityReference("msdyn_project", projectId);
+                _service.Update(templateUpdate);
+            }
+            catch (Exception ex)
+            {
+                _trace?.Trace("CaseImportService: Failed to link project to template (non-fatal): {0}", ex.Message);
+            }
+
+            // 6. Wait for project commit, then start import
+            _trace?.Trace("CaseImportService: Sleeping 10s for project commit...");
+            System.Threading.Thread.Sleep(10000);
+
+            _trace?.Trace("CaseImportService: Calling InitializeJob for template import...");
+            var importService = new MppAsyncImportService(_service, _trace);
+            Guid jobId = importService.InitializeJob(
+                mppBytes, projectId, templateId, projectStartDate: null,
+                caseId: null, initiatingUserId: initiatingUserIdOverride);
+            _trace?.Trace("CaseImportService: Template import job created: {0}", jobId);
+
+            return jobId;
+        }
+
+        /// <summary>
+        /// Marks the template as failed with the given error message.
+        /// </summary>
+        public void MarkTemplateFailed(Guid templateId, string errorMessage)
+        {
+            try
+            {
+                var failUpdate = new Entity("adc_adccasetemplate", templateId);
+                failUpdate["adc_importstatus"] = new OptionSetValue(4); // Failed
+                var errMsg = "Template import failed: " + errorMessage;
+                failUpdate["adc_importmessage"] = errMsg.Length > 100 ? errMsg.Substring(0, 97) + "..." : errMsg;
+                _service.Update(failUpdate);
+            }
+            catch (Exception updateEx)
+            {
+                _trace?.Trace("Could not update template to failed state: {0}", updateEx.Message);
+            }
+        }
+
+        /// <summary>
         /// Overload that accepts a target Entity for plugin scenarios where
         /// attributes may be available on the target before DB commit.
         /// </summary>

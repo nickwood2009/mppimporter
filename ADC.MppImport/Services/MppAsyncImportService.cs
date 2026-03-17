@@ -742,7 +742,7 @@ namespace ADC.MppImport.Services
             try
             {
                 var job = _service.Retrieve(ImportJobFields.EntityName, jobId,
-                    new ColumnSet(ImportJobFields.Project, ImportJobFields.InitiatingUser, ImportJobFields.Case));
+                    new ColumnSet(ImportJobFields.Project, ImportJobFields.InitiatingUser, ImportJobFields.Case, ImportJobFields.CaseTemplate));
                 var userRef = job.GetAttributeValue<EntityReference>(ImportJobFields.InitiatingUser);
                 var projectRef = job.GetAttributeValue<EntityReference>(ImportJobFields.Project);
                 if (userRef != null && projectRef != null)
@@ -796,7 +796,7 @@ namespace ADC.MppImport.Services
             {
                 var job = _service.Retrieve(ImportJobFields.EntityName, jobId,
                     new ColumnSet(ImportJobFields.Project, ImportJobFields.InitiatingUser,
-                        ImportJobFields.TotalTasks, ImportJobFields.Case));
+                        ImportJobFields.TotalTasks, ImportJobFields.Case, ImportJobFields.CaseTemplate));
                 var userRef = job.GetAttributeValue<EntityReference>(ImportJobFields.InitiatingUser);
                 var projectRef = job.GetAttributeValue<EntityReference>(ImportJobFields.Project);
                 if (userRef != null && projectRef != null)
@@ -1110,13 +1110,30 @@ namespace ADC.MppImport.Services
             try
             {
                 var caseRef = job.GetAttributeValue<EntityReference>(ImportJobFields.Case);
-                if (caseRef == null) return;
+                var templateRef = job.GetAttributeValue<EntityReference>(ImportJobFields.CaseTemplate);
 
-                var caseUpdate = new Entity("adc_case", caseRef.Id);
-                caseUpdate["adc_importstatus"] = new OptionSetValue(1); // Processing
-                caseUpdate["adc_importmessage"] = progressMessage.Length > 100
+                string entityName;
+                Guid entityId;
+                if (caseRef != null)
+                {
+                    entityName = "adc_case";
+                    entityId = caseRef.Id;
+                }
+                else if (templateRef != null)
+                {
+                    entityName = "adc_adccasetemplate";
+                    entityId = templateRef.Id;
+                }
+                else
+                {
+                    return;
+                }
+
+                var statusUpdate = new Entity(entityName, entityId);
+                statusUpdate["adc_importstatus"] = new OptionSetValue(1); // Processing
+                statusUpdate["adc_importmessage"] = progressMessage.Length > 100
                     ? progressMessage.Substring(0, 97) + "..." : progressMessage;
-                _service.Update(caseUpdate);
+                _service.Update(statusUpdate);
             }
             catch (Exception ex)
             {
@@ -1129,19 +1146,36 @@ namespace ADC.MppImport.Services
             try
             {
                 var caseRef = job.GetAttributeValue<EntityReference>(ImportJobFields.Case);
-                if (caseRef == null) return;
+                var templateRef = job.GetAttributeValue<EntityReference>(ImportJobFields.CaseTemplate);
 
-                int caseImportStatus;
+                string entityName;
+                Guid entityId;
+                if (caseRef != null)
+                {
+                    entityName = "adc_case";
+                    entityId = caseRef.Id;
+                }
+                else if (templateRef != null)
+                {
+                    entityName = "adc_adccasetemplate";
+                    entityId = templateRef.Id;
+                }
+                else
+                {
+                    return;
+                }
+
+                int importStatus;
                 switch (jobStatus)
                 {
                     case ImportJobStatus.Completed:
-                        caseImportStatus = (message != null && message.Contains("failed")) ? 3 : 2;
+                        importStatus = (message != null && message.Contains("failed")) ? 3 : 2;
                         break;
                     case ImportJobStatus.Failed:
-                        caseImportStatus = 4;
+                        importStatus = 4;
                         break;
                     default:
-                        caseImportStatus = 1; // Processing
+                        importStatus = 1; // Processing
                         break;
                 }
 
@@ -1157,12 +1191,12 @@ namespace ADC.MppImport.Services
                 }
 
                 string fullMessage = (message ?? "") + runtime;
-                var caseUpdate = new Entity("adc_case", caseRef.Id);
-                caseUpdate["adc_importstatus"] = new OptionSetValue(caseImportStatus);
-                caseUpdate["adc_importmessage"] = fullMessage.Length > 100
+                var statusUpdate = new Entity(entityName, entityId);
+                statusUpdate["adc_importstatus"] = new OptionSetValue(importStatus);
+                statusUpdate["adc_importmessage"] = fullMessage.Length > 100
                     ? fullMessage.Substring(0, 97) + "..." : fullMessage;
-                _service.Update(caseUpdate);
-                _trace?.Trace("Updated case {0} import status: {1}", caseRef.Id, caseImportStatus);
+                _service.Update(statusUpdate);
+                _trace?.Trace("Updated {0} {1} import status: {2}", entityName, entityId, importStatus);
             }
             catch (Exception ex)
             {

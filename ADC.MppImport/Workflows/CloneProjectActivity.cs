@@ -80,6 +80,9 @@ namespace ADC.MppImport.Workflows
             TracingService.Trace("CloneProject: Creating target project '{0}' with start {1:yyyy-MM-dd}...",
                 targetProjectName, startDateNormalized);
 
+            // Update case status to Processing
+            UpdateCaseStatus(caseRef.Id, 1, "Cloning template project...");
+
             // 1. Create empty target project with desired start date
             var targetProject = new Entity("msdyn_project");
             targetProject["msdyn_subject"] = targetProjectName;
@@ -103,6 +106,7 @@ namespace ADC.MppImport.Workflows
 
             // 2. Call msdyn_CopyProjectV3
             TracingService.Trace("CloneProject: Calling msdyn_CopyProjectV3...");
+            UpdateCaseStatus(caseRef.Id, 1, "Copying project tasks and dependencies...");
             try
             {
                 var copyRequest = new OrganizationRequest("msdyn_CopyProjectV3");
@@ -119,6 +123,7 @@ namespace ADC.MppImport.Workflows
             {
                 string errMsg = string.Format("CopyProjectV3 failed: {0}", ex.Message);
                 TracingService.Trace("CloneProject: {0}", errMsg);
+                UpdateCaseStatus(caseRef.Id, 4, errMsg);
                 Success.Set(executionContext, false);
                 ResultMessage.Set(executionContext, errMsg);
                 NewProject.Set(executionContext, new EntityReference("msdyn_project", targetProjectId));
@@ -133,6 +138,7 @@ namespace ADC.MppImport.Workflows
             if (isSynchronous)
             {
                 TracingService.Trace("CloneProject: Running in real-time workflow — skipping poll. Copy will complete async.");
+                UpdateCaseStatus(caseRef.Id, 1, "Project copy running in the background...");
                 NewProject.Set(executionContext, new EntityReference("msdyn_project", targetProjectId));
                 Success.Set(executionContext, true);
                 ResultMessage.Set(executionContext, string.Format(
@@ -167,13 +173,39 @@ namespace ADC.MppImport.Workflows
                     finalMessage = "Project copy failed. Check PSS Error Logs for details.";
                     break;
                 }
+                else
+                {
+                    UpdateCaseStatus(caseRef.Id, 1, string.Format("Copying project... (poll {0}/{1})", attempt + 1, POLL_MAX_ATTEMPTS));
+                }
             }
 
             TracingService.Trace("CloneProject: {0}", finalMessage);
 
+            // Update case with final status
+            if (copySucceeded)
+                UpdateCaseStatus(caseRef.Id, 2, finalMessage);
+            else
+                UpdateCaseStatus(caseRef.Id, 4, finalMessage);
+
             NewProject.Set(executionContext, new EntityReference("msdyn_project", targetProjectId));
             Success.Set(executionContext, copySucceeded);
             ResultMessage.Set(executionContext, finalMessage);
+        }
+
+        private void UpdateCaseStatus(Guid caseId, int importStatus, string message)
+        {
+            try
+            {
+                var caseUpdate = new Entity("adc_case", caseId);
+                caseUpdate["adc_importstatus"] = new OptionSetValue(importStatus);
+                caseUpdate["adc_importmessage"] = message != null && message.Length > 100
+                    ? message.Substring(0, 97) + "..." : message;
+                OrganizationService.Update(caseUpdate);
+            }
+            catch (Exception ex)
+            {
+                TracingService.Trace("CloneProject: UpdateCaseStatus failed (non-fatal): {0}", ex.Message);
+            }
         }
     }
 }

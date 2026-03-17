@@ -5,9 +5,9 @@
  * Reads adc_importstatus (optionset) and adc_importmessage (string) fields
  * and shows/hides a setFormNotification banner accordingly.
  *
- * Register as onLoad event handler on the adc_case main form.
- * Function: ADC.CaseImportBanner.onLoad
- * Pass execution context: Yes
+ * Register on the adc_case main form:
+ *   1. onLoad:   ADC.CaseImportBanner.onLoad   (pass execution context)
+ *   2. onChange:  ADC.CaseImportBanner.onChange  (on adc_importstatus, pass execution context)
  *
  * Status values:
  *   0 = Queued
@@ -50,18 +50,35 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
         var status = statusAttr ? statusAttr.getValue() : null;
 
         if (status === STATUS.QUEUED || status === STATUS.PROCESSING) {
-            // Import already in progress — poll immediately
+            // Import/clone already in progress — poll immediately
             startPolling(formContext);
         } else if (status === null || status === undefined) {
             // Status not set yet — check if a case template is selected,
-            // meaning the async plugin will kick off shortly
+            // meaning the async workflow will kick off shortly
             var templateAttr = formContext.getAttribute("adc_adccasetemplateid");
             var hasTemplate = templateAttr && templateAttr.getValue() && templateAttr.getValue().length > 0;
             if (hasTemplate) {
                 formContext.ui.setFormNotification(
-                    "MPP import starting — please wait...", "INFO", NOTIFICATION_ID);
+                    "Project setup starting — please wait...", "INFO", NOTIFICATION_ID);
                 startPolling(formContext);
             }
+        }
+    };
+
+    /**
+     * onChange handler for adc_importstatus — detects when an async workflow
+     * updates the status and kicks off polling + banner display.
+     */
+    ADC.CaseImportBanner.onChange = function (executionContext) {
+        var formContext = executionContext.getFormContext();
+
+        updateBanner(formContext);
+
+        var statusAttr = formContext.getAttribute("adc_importstatus");
+        var status = statusAttr ? statusAttr.getValue() : null;
+
+        if (status === STATUS.QUEUED || status === STATUS.PROCESSING) {
+            startPolling(formContext);
         }
     };
 
@@ -83,7 +100,7 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
         }
 
         if (status === STATUS.QUEUED || status === STATUS.PROCESSING) {
-            var text = "MPP import in progress";
+            var text = "Project setup in progress";
             if (msg) text += " — " + msg;
 
             if (!_startTime) {
@@ -96,17 +113,17 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
             startTicker(formContext);
         } else if (status === STATUS.FAILED) {
             stopTicker();
-            var textErr = "MPP import failed";
+            var textErr = "Project setup failed";
             if (msg) textErr += " — " + msg;
             formContext.ui.setFormNotification(textErr, "ERROR", NOTIFICATION_ID);
         } else if (status === STATUS.COMPLETED_WARNINGS) {
             stopTicker();
-            var textWarn = "MPP import completed with warnings";
+            var textWarn = "Project setup completed with warnings";
             if (msg) textWarn += " — " + msg;
             formContext.ui.setFormNotification(textWarn, "WARNING", NOTIFICATION_ID);
         } else if (status === STATUS.COMPLETED) {
             stopTicker();
-            var textOk = "MPP import completed";
+            var textOk = "Project setup completed";
             if (msg) textOk += " — " + msg;
             formContext.ui.setFormNotification(textOk, "INFO", NOTIFICATION_ID);
             setTimeout(function () {
@@ -171,7 +188,7 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
 
             if (status === STATUS.QUEUED || status === STATUS.PROCESSING || status === null) {
                 var msg = msgAttr ? (msgAttr.getValue() || "") : "";
-                var text = (status === null) ? "MPP import starting" : "MPP import in progress";
+                var text = (status === null) ? "Project setup starting" : "Project setup in progress";
                 if (msg) text += " — " + msg;
                 var elapsed = _startTime ? Math.floor((new Date() - _startTime) / 1000) : 0;
                 var display = text + " (" + formatElapsed(elapsed) + ")";

@@ -58,22 +58,15 @@ ADC.CaseTemplateRibbon = ADC.CaseTemplateRibbon || {};
                 if (req.readyState !== 4) return;
 
                 if (req.status === 200 || req.status === 204) {
-                    // Workflow started successfully — refresh form and start polling
+                    // Workflow started successfully — show banner and start polling
                     formContext.ui.setFormNotification(
                         "Template project import in progress — please wait...", "INFO", NOTIFICATION_ID);
 
-                    // Refresh form data to pick up any immediate server-side changes
-                    setTimeout(function () {
-                        formContext.data.refresh(false).then(function () {
-                            // Trigger the banner's polling via onChange if status was updated
-                            if (typeof ADC.CaseTemplateImportBanner !== "undefined" &&
-                                typeof ADC.CaseTemplateImportBanner.onChange === "function") {
-                                // Create a minimal execution context wrapper
-                                var fakeCtx = { getFormContext: function () { return formContext; } };
-                                ADC.CaseTemplateImportBanner.onChange(fakeCtx);
-                            }
-                        });
-                    }, 2000);
+                    // Start our own polling loop that refreshes form data and
+                    // checks import status. We don't delegate to the banner's
+                    // onChange because it clears the notification when status is
+                    // still null (server hasn't processed yet).
+                    startImportPolling(formContext);
                 } else {
                     // Workflow failed to start
                     var errorMsg = "Failed to start import workflow.";
@@ -96,6 +89,54 @@ ADC.CaseTemplateRibbon = ADC.CaseTemplateRibbon || {};
             req.send(requestBody);
         });
     };
+
+    var _pollId = null;
+    var POLL_INTERVAL_MS = 5000; // 5 seconds
+
+    var STATUS = {
+        QUEUED: 0,
+        PROCESSING: 1,
+        COMPLETED: 2,
+        COMPLETED_WARNINGS: 3,
+        FAILED: 4
+    };
+
+    /**
+     * Polls the form data every 5 seconds after the workflow is triggered.
+     * Keeps the banner alive until a real status appears, then hands off
+     * to the import banner's updateBanner logic.
+     */
+    function startImportPolling(formContext) {
+        if (_pollId) return; // already polling
+
+        _pollId = setInterval(function () {
+            try {
+                formContext.data.refresh(false).then(function () {
+                    var statusAttr = formContext.getAttribute("adc_importstatus");
+                    var status = statusAttr ? statusAttr.getValue() : null;
+
+                    if (status !== null && status !== undefined) {
+                        // Server has set a real status — hand off to the banner JS
+                        clearInterval(_pollId);
+                        _pollId = null;
+
+                        if (typeof ADC.CaseTemplateImportBanner !== "undefined" &&
+                            typeof ADC.CaseTemplateImportBanner.onChange === "function") {
+                            var fakeCtx = { getFormContext: function () { return formContext; } };
+                            ADC.CaseTemplateImportBanner.onChange(fakeCtx);
+                        }
+                    }
+                    // status is still null — keep polling, keep banner visible
+                }, function () {
+                    clearInterval(_pollId);
+                    _pollId = null;
+                });
+            } catch (e) {
+                clearInterval(_pollId);
+                _pollId = null;
+            }
+        }, POLL_INTERVAL_MS);
+    }
 
     /**
      * Enable rule — only enable the button when:

@@ -88,11 +88,13 @@ ADC.CaseTemplateForm = ADC.CaseTemplateForm || {};
      */
     function expandTemplateProjectGrid() {
         var pollId = setInterval(function () {
-            var targetDiv = parent.window.document.querySelector(
+            var targets = parent.window.document.querySelectorAll(
                 'div[id*="adc_templateproject"][id*="modelFormComponent"]');
 
-            if (targetDiv) {
-                targetDiv.style.height = "100%";
+            if (targets.length > 0) {
+                for (var i = 0; i < targets.length; i++) {
+                    targets[i].style.height = "100%";
+                }
                 clearInterval(pollId);
             }
         }, 500);

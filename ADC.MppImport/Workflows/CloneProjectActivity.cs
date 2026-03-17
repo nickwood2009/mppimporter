@@ -27,6 +27,9 @@ namespace ADC.MppImport.Workflows
         [RequiredArgument]
         public InArgument<DateTime> NewStartDate { get; set; }
 
+        [Input("Clear Teams And Assignments"), Default("True")]
+        public InArgument<bool> ClearTeamsAndAssignments { get; set; }
+
         [Output("New Project")]
         [ReferenceTarget("msdyn_project")]
         public OutArgument<EntityReference> NewProject { get; set; }
@@ -45,6 +48,7 @@ namespace ADC.MppImport.Workflows
             var sourceRef = SourceProject.Get(executionContext);
             var caseRef = TargetCase.Get(executionContext);
             var newStartDate = NewStartDate.Get(executionContext);
+            bool clearTeams = ClearTeamsAndAssignments.Get(executionContext);
 
             if (sourceRef == null)
                 throw new InvalidPluginExecutionException("Source Project input is required.");
@@ -53,8 +57,8 @@ namespace ADC.MppImport.Workflows
             if (newStartDate == default(DateTime))
                 throw new InvalidPluginExecutionException("New Start Date input is required.");
 
-            TracingService.Trace("CloneProject: Source={0}, Case={1}, NewStart={2:yyyy-MM-dd}",
-                sourceRef.Id, caseRef.Id, newStartDate);
+            TracingService.Trace("CloneProject: Source={0}, Case={1}, NewStart={2:yyyy-MM-dd}, ClearTeams={3}",
+                sourceRef.Id, caseRef.Id, newStartDate, clearTeams);
 
             // Normalize start date to noon UTC to avoid timezone edge issues
             DateTime startDateNormalized = newStartDate.Date.AddHours(12);
@@ -104,7 +108,10 @@ namespace ADC.MppImport.Workflows
                 var copyRequest = new OrganizationRequest("msdyn_CopyProjectV3");
                 copyRequest["SourceProject"] = sourceRef;
                 copyRequest["Target"] = new EntityReference("msdyn_project", targetProjectId);
-                copyRequest["ClearTeamsAndAssignments"] = true;
+                if (clearTeams)
+                    copyRequest["ClearTeamsAndAssignments"] = true;
+                else
+                    copyRequest["ReplaceNamedResources"] = true;
                 OrganizationService.Execute(copyRequest);
                 TracingService.Trace("CloneProject: CopyProjectV3 initiated.");
             }

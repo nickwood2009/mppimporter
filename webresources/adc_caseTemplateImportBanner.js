@@ -8,6 +8,7 @@
  * Register on the adc_adccasetemplate main form:
  *   1. onLoad:   ADC.CaseTemplateImportBanner.onLoad   (pass execution context)
  *   2. onChange:  ADC.CaseTemplateImportBanner.onChange  (on adc_importstatus, pass execution context)
+ *   3. onSave:   ADC.CaseTemplateImportBanner.onSave   (pass execution context)
  *
  * Status values:
  *   0 = Queued
@@ -70,6 +71,30 @@ ADC.CaseTemplateImportBanner = ADC.CaseTemplateImportBanner || {};
         if (status === STATUS.QUEUED || status === STATUS.PROCESSING) {
             startPolling(formContext);
         }
+    };
+
+    /**
+     * onSave handler — after save, if the import hasn't reached a terminal
+     * state, show the banner and start polling so the user sees progress
+     * without a manual refresh.
+     */
+    ADC.CaseTemplateImportBanner.onSave = function (executionContext) {
+        var formContext = executionContext.getFormContext();
+
+        var statusAttr = formContext.getAttribute("adc_importstatus");
+        var status = statusAttr ? statusAttr.getValue() : null;
+
+        // If already completed/failed, don't restart polling
+        if (status === STATUS.COMPLETED || status === STATUS.COMPLETED_WARNINGS || status === STATUS.FAILED) return;
+
+        // Delay banner display until after the post-save form re-render
+        setTimeout(function () {
+            _startTime = new Date();
+            formContext.ui.setFormNotification(
+                "Template project import starting — please wait...", "INFO", NOTIFICATION_ID);
+            startTicker(formContext);
+            startPolling(formContext);
+        }, 2000);
     };
 
     /**

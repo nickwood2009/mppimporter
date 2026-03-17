@@ -3,6 +3,7 @@ using System.Activities;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Microsoft.Xrm.Sdk.Workflow;
+using ADC.MppImport.Services;
 
 namespace ADC.MppImport.Workflows
 {
@@ -60,6 +61,12 @@ namespace ADC.MppImport.Workflows
             TracingService.Trace("CloneProject: Source={0}, Case={1}, NewStart={2:yyyy-MM-dd}, ClearTeams={3}",
                 sourceRef.Id, caseRef.Id, newStartDate, clearTeams);
 
+            // Resolve initiating user for notifications
+            Guid? initiatingUserId = null;
+            var wfCtx = executionContext.GetExtension<IWorkflowContext>();
+            if (wfCtx != null)
+                initiatingUserId = wfCtx.InitiatingUserId;
+
             // Normalize start date to noon UTC to avoid timezone edge issues
             DateTime startDateNormalized = newStartDate.Date.AddHours(12);
 
@@ -80,8 +87,14 @@ namespace ADC.MppImport.Workflows
             TracingService.Trace("CloneProject: Creating target project '{0}' with start {1:yyyy-MM-dd}...",
                 targetProjectName, startDateNormalized);
 
-            // Update case status to Processing
+            // Update case status to Processing + send start notification
             UpdateCaseStatus(caseRef.Id, 1, "Cloning template project...");
+            if (initiatingUserId.HasValue)
+            {
+                SendNotification(initiatingUserId.Value, "Project Clone Started",
+                    string.Format("Cloning template project into '{0}' — running in background.", targetProjectName),
+                    NotificationIconType.Info, caseRef.Id);
+            }
 
             // 1. Create empty target project with desired start date
             var targetProject = new Entity("msdyn_project");
@@ -124,6 +137,8 @@ namespace ADC.MppImport.Workflows
                 string errMsg = string.Format("CopyProjectV3 failed: {0}", ex.Message);
                 TracingService.Trace("CloneProject: {0}", errMsg);
                 UpdateCaseStatus(caseRef.Id, 4, errMsg);
+                if (initiatingUserId.HasValue)
+                    SendNotification(initiatingUserId.Value, "Project Clone Failed", errMsg, NotificationIconType.Failure, caseRef.Id);
                 Success.Set(executionContext, false);
                 ResultMessage.Set(executionContext, errMsg);
                 NewProject.Set(executionContext, new EntityReference("msdyn_project", targetProjectId));
@@ -132,8 +147,7 @@ namespace ADC.MppImport.Workflows
 
             // 3. Poll for completion (async workflows only — synchronous/real-time
             //    workflows run inside a transaction where Thread.Sleep is not allowed)
-            var wfContext = executionContext.GetExtension<IWorkflowContext>();
-            bool isSynchronous = wfContext != null && wfContext.Mode == 1; // 0=Async, 1=Synchronous
+            bool isSynchronous = wfCtx != null && wfCtx.Mode == 1; // 0=Async, 1=Synchronous
 
             if (isSynchronous)
             {
@@ -181,11 +195,19 @@ namespace ADC.MppImport.Workflows
 
             TracingService.Trace("CloneProject: {0}", finalMessage);
 
-            // Update case with final status
+            // Update case with final status + send notification
             if (copySucceeded)
+            {
                 UpdateCaseStatus(caseRef.Id, 2, finalMessage);
+                if (initiatingUserId.HasValue)
+                    SendNotification(initiatingUserId.Value, "Project Clone Complete", finalMessage, NotificationIconType.Success, caseRef.Id);
+            }
             else
+            {
                 UpdateCaseStatus(caseRef.Id, 4, finalMessage);
+                if (initiatingUserId.HasValue)
+                    SendNotification(initiatingUserId.Value, "Project Clone Failed", finalMessage, NotificationIconType.Failure, caseRef.Id);
+            }
 
             NewProject.Set(executionContext, new EntityReference("msdyn_project", targetProjectId));
             Success.Set(executionContext, copySucceeded);
@@ -205,6 +227,33 @@ namespace ADC.MppImport.Workflows
             catch (Exception ex)
             {
                 TracingService.Trace("CloneProject: UpdateCaseStatus failed (non-fatal): {0}", ex.Message);
+            }
+        }
+
+        private void SendNotification(Guid recipientUserId, string title, string body, int iconType, Guid? caseId = null)
+        {
+            try
+            {
+                var notification = new Entity("appnotification");
+                notification["title"] = title;
+                notification["body"] = body;
+                notification["ownerid"] = new EntityReference("systemuser", recipientUserId);
+                notification["icontype"] = new OptionSetValue(iconType);
+                notification["toasttype"] = new OptionSetValue(200000000); // Timed (shows toast)
+
+                if (caseId.HasValue)
+                {
+                    notification["data"] = string.Format(
+                        "{{\"actions\":[{{\"title\":\"Open Case\",\"data\":{{\"url\":\"?pagetype=entityrecord&etn=adc_case&id={0}\",\"navigationTarget\":\"dialog\"}}}}]}}",
+                        caseId.Value);
+                }
+
+                OrganizationService.Create(notification);
+                TracingService.Trace("CloneProject: Notification sent to {0}: {1}", recipientUserId, title);
+            }
+            catch (Exception ex)
+            {
+                TracingService.Trace("CloneProject: SendNotification failed (non-fatal): {0}", ex.Message);
             }
         }
     }

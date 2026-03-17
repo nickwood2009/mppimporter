@@ -7,7 +7,7 @@
  *
  * Register on the adc_case main form:
  *   1. onLoad:   ADC.CaseImportBanner.onLoad   (pass execution context)
- *   2. onChange:  ADC.CaseImportBanner.onChange  (on adc_importstatus, pass execution context)
+ *   2. onSave:    ADC.CaseImportBanner.onSave   (pass execution context)
  *
  * Status values:
  *   0 = Queued
@@ -66,20 +66,30 @@ ADC.CaseImportBanner = ADC.CaseImportBanner || {};
     };
 
     /**
-     * onChange handler for adc_importstatus — detects when an async workflow
-     * updates the status and kicks off polling + banner display.
+     * onSave handler — after the user saves the form, if a case template is
+     * selected the async workflow will fire server-side. Show the banner and
+     * start polling so the user sees progress without a manual refresh.
      */
-    ADC.CaseImportBanner.onChange = function (executionContext) {
+    ADC.CaseImportBanner.onSave = function (executionContext) {
         var formContext = executionContext.getFormContext();
 
-        updateBanner(formContext);
+        // Only kick off polling if a template is set and status hasn't reached a terminal state
+        var templateAttr = formContext.getAttribute("adc_adccasetemplateid");
+        var hasTemplate = templateAttr && templateAttr.getValue() && templateAttr.getValue().length > 0;
+        if (!hasTemplate) return;
 
         var statusAttr = formContext.getAttribute("adc_importstatus");
         var status = statusAttr ? statusAttr.getValue() : null;
 
-        if (status === STATUS.QUEUED || status === STATUS.PROCESSING) {
-            startPolling(formContext);
-        }
+        // If already completed/failed, don't restart polling
+        if (status === STATUS.COMPLETED || status === STATUS.COMPLETED_WARNINGS || status === STATUS.FAILED) return;
+
+        // Show immediate feedback and start polling
+        _startTime = new Date();
+        formContext.ui.setFormNotification(
+            "Project setup starting — please wait...", "INFO", NOTIFICATION_ID);
+        startTicker(formContext);
+        startPolling(formContext);
     };
 
     /**

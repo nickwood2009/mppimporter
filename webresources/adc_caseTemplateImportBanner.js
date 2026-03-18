@@ -84,8 +84,9 @@ ADC.CaseTemplateImportBanner = ADC.CaseTemplateImportBanner || {};
         var statusAttr = formContext.getAttribute("adc_importstatus");
         var status = statusAttr ? statusAttr.getValue() : null;
 
-        // If already completed/failed, don't restart polling
-        if (status === STATUS.COMPLETED || status === STATUS.COMPLETED_WARNINGS || status === STATUS.FAILED) return;
+        // If no import in progress or already completed/failed, don't show banner
+        if (status === null || status === undefined ||
+            status === STATUS.COMPLETED || status === STATUS.COMPLETED_WARNINGS || status === STATUS.FAILED) return;
 
         // Delay banner display until after the post-save form re-render
         setTimeout(function () {

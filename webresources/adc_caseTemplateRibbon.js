@@ -17,7 +17,7 @@ ADC.CaseTemplateRibbon = ADC.CaseTemplateRibbon || {};
     "use strict";
 
     // *** UPDATE THIS with your actual workflow ID ***
-    var IMPORT_TEMPLATE_WORKFLOW_ID = "00000000-0000-0000-0000-000000000000";
+    var IMPORT_TEMPLATE_WORKFLOW_ID = "a89e3a89-af21-f111-8342-000d3a794a10";
 
     var NOTIFICATION_ID = "template_import";
 

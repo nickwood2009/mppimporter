@@ -146,7 +146,34 @@ namespace ADC.MppImport.Services
                 _trace?.Trace("CaseImportService: Failed to set template import status (non-fatal): {0}", ex.Message);
             }
 
-            // 4. Create template project
+            // 4. Resolve the initiating user's local "today" for the project start date
+            //    Without this, PSS defaults to UTC date which is yesterday for UTC+N users before N:00 local time.
+            DateTime? projectStartDate = null;
+            if (initiatingUserIdOverride.HasValue)
+            {
+                try
+                {
+                    var userSettings = _service.Retrieve("usersettings", initiatingUserIdOverride.Value,
+                        new ColumnSet("timezonecode"));
+                    int tzCode = userSettings.GetAttributeValue<int>("timezonecode");
+                    _trace?.Trace("CaseImportService: User timezone code = {0}", tzCode);
+
+                    var localTimeReq = new Microsoft.Crm.Sdk.Messages.LocalTimeFromUtcTimeRequest
+                    {
+                        TimeZoneCode = tzCode,
+                        UtcTime = DateTime.UtcNow
+                    };
+                    var localTimeResp = (Microsoft.Crm.Sdk.Messages.LocalTimeFromUtcTimeResponse)_service.Execute(localTimeReq);
+                    projectStartDate = localTimeResp.LocalTime.Date;
+                    _trace?.Trace("CaseImportService: User local today = {0:yyyy-MM-dd}", projectStartDate.Value);
+                }
+                catch (Exception ex)
+                {
+                    _trace?.Trace("CaseImportService: Could not resolve user timezone (non-fatal): {0}", ex.Message);
+                }
+            }
+
+            // 5. Create template project
             string projectName = templateName + " [Template]";
             var projectEntity = new Entity("msdyn_project");
             projectEntity["msdyn_subject"] = projectName;
@@ -174,7 +201,7 @@ namespace ADC.MppImport.Services
             _trace?.Trace("CaseImportService: Calling InitializeJob for template import...");
             var importService = new MppAsyncImportService(_service, _trace);
             Guid jobId = importService.InitializeJob(
-                mppBytes, projectId, templateId, projectStartDate: null,
+                mppBytes, projectId, templateId, projectStartDate: projectStartDate,
                 caseId: null, initiatingUserId: initiatingUserIdOverride);
             _trace?.Trace("CaseImportService: Template import job created: {0}", jobId);
 

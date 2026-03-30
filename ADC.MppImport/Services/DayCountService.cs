@@ -40,7 +40,7 @@ namespace ADC.MppImport.Services
         private const string TASK_FINISH = "msdyn_scheduledend";
         private const string TASK_NAME = "msdyn_subject";
         private const string TASK_PROJECT = "msdyn_project";
-        private const string TASK_DAY_COUNT = "adc_daycount";               // PLACEHOLDER — int field on task
+        private const string TASK_DAY_COUNT = "adc_daycount1";
 
         // Milestone task names (matched by msdyn_subject)
         private const string MILESTONE_APPLICATION_DATE = "Application date";
@@ -78,7 +78,7 @@ namespace ADC.MppImport.Services
 
         // The fixed day count for the Application date milestone in Scenario 2
         // before an initiation date is set
-        private const int APPLICATION_DATE_INITIAL_DAY_COUNT = -20;
+        private const decimal APPLICATION_DATE_INITIAL_DAY_COUNT = -20m;
 
         public DayCountService(IOrganizationService service, ITracingService trace)
         {
@@ -101,27 +101,43 @@ namespace ADC.MppImport.Services
             var task = _service.Retrieve(TASK_ENTITY, taskId,
                 new ColumnSet(TASK_FINISH, TASK_NAME, TASK_PROJECT, TASK_DAY_COUNT));
 
+            var taskName = task.GetAttributeValue<string>(TASK_NAME) ?? "(no name)";
+            _trace?.Trace("DayCountService: Retrieved task '{0}' (id={1})", taskName, taskId);
+
             var projectRef = task.GetAttributeValue<EntityReference>(TASK_PROJECT);
             if (projectRef == null)
             {
-                _trace?.Trace("DayCountService: Task has no project reference, skipping.");
+                _trace?.Trace("DayCountService: Task '{0}' has no project reference, skipping.", taskName);
+                return;
+            }
+            _trace?.Trace("DayCountService: Task belongs to project {0}", projectRef.Id);
+
+            var context = BuildContext(projectRef.Id);
+            if (context == null)
+            {
+                _trace?.Trace("DayCountService: BuildContext returned null for project {0}, aborting.", projectRef.Id);
                 return;
             }
 
-            var context = BuildContext(projectRef.Id);
-            if (context == null) return;
+            decimal? dayCount = CalculateDayCount(task, context);
+            _trace?.Trace("DayCountService: CalculateDayCount for '{0}' returned {1}",
+                taskName, dayCount.HasValue ? dayCount.Value.ToString() : "(null)");
 
-            int? dayCount = CalculateDayCount(task, context);
             if (dayCount.HasValue)
             {
-                int existingDayCount = task.GetAttributeValue<int>(TASK_DAY_COUNT);
+                decimal existingDayCount = task.GetAttributeValue<decimal>(TASK_DAY_COUNT);
                 if (existingDayCount != dayCount.Value)
                 {
                     var update = new Entity(TASK_ENTITY, taskId);
                     update[TASK_DAY_COUNT] = dayCount.Value;
                     _service.Update(update);
-                    _trace?.Trace("DayCountService: Updated task {0} day count: {1} → {2}",
-                        taskId, existingDayCount, dayCount.Value);
+                    _trace?.Trace("DayCountService: Updated task '{0}' day count: {1} → {2}",
+                        taskName, existingDayCount, dayCount.Value);
+                }
+                else
+                {
+                    _trace?.Trace("DayCountService: Task '{0}' day count unchanged at {1}, no update needed.",
+                        taskName, existingDayCount);
                 }
             }
         }
@@ -135,29 +151,53 @@ namespace ADC.MppImport.Services
             _trace?.Trace("DayCountService.RecalcAllTasks: projectId={0}", projectId);
 
             var context = BuildContext(projectId);
-            if (context == null) return;
+            if (context == null)
+            {
+                _trace?.Trace("DayCountService: BuildContext returned null for project {0}, aborting RecalcAllTasks.", projectId);
+                return;
+            }
 
             var tasks = RetrieveAllTasks(projectId);
             _trace?.Trace("DayCountService: Found {0} tasks to recalculate.", tasks.Count);
 
+            if (tasks.Count == 0)
+            {
+                _trace?.Trace("DayCountService: No tasks found for project {0}, nothing to recalculate.", projectId);
+                return;
+            }
+
             int updated = 0;
+            int skipped = 0;
+            int unchanged = 0;
             foreach (var task in tasks)
             {
-                int? dayCount = CalculateDayCount(task, context);
-                if (dayCount.HasValue)
+                string tName = task.GetAttributeValue<string>(TASK_NAME) ?? "(no name)";
+                decimal? dayCount = CalculateDayCount(task, context);
+
+                if (!dayCount.HasValue)
                 {
-                    int existingDayCount = task.GetAttributeValue<int>(TASK_DAY_COUNT);
-                    if (existingDayCount != dayCount.Value)
-                    {
-                        var update = new Entity(TASK_ENTITY, task.Id);
-                        update[TASK_DAY_COUNT] = dayCount.Value;
-                        _service.Update(update);
-                        updated++;
-                    }
+                    skipped++;
+                    continue;
+                }
+
+                decimal existingDayCount = task.GetAttributeValue<decimal>(TASK_DAY_COUNT);
+                if (existingDayCount != dayCount.Value)
+                {
+                    var update = new Entity(TASK_ENTITY, task.Id);
+                    update[TASK_DAY_COUNT] = dayCount.Value;
+                    _service.Update(update);
+                    _trace?.Trace("DayCountService:   [{0}] '{1}' — {2} → {3}",
+                        updated + 1, tName, existingDayCount, dayCount.Value);
+                    updated++;
+                }
+                else
+                {
+                    unchanged++;
                 }
             }
 
-            _trace?.Trace("DayCountService: Recalculated {0}/{1} tasks.", updated, tasks.Count);
+            _trace?.Trace("DayCountService: RecalcAllTasks complete — {0} updated, {1} unchanged, {2} skipped (no finish/ref date).",
+                updated, unchanged, skipped);
         }
 
         /// <summary>
@@ -185,7 +225,7 @@ namespace ADC.MppImport.Services
                 {
                     var milestoneUpdate = new Entity(TASK_ENTITY, milestone.Id);
                     milestoneUpdate[TASK_FINISH] = initiationDate.Value;
-                    milestoneUpdate[TASK_DAY_COUNT] = 0;
+                    milestoneUpdate[TASK_DAY_COUNT] = 0m;
                     _service.Update(milestoneUpdate);
                     _trace?.Trace("DayCountService: Updated Initiation date milestone finish to {0:yyyy-MM-dd}",
                         initiationDate.Value);
@@ -223,14 +263,20 @@ namespace ADC.MppImport.Services
         /// </summary>
         private CalcContext BuildContext(Guid projectId)
         {
+            _trace?.Trace("DayCountService.BuildContext: projectId={0}", projectId);
+
             // Get the linked case
             var project = _service.Retrieve(PROJECT_ENTITY, projectId,
                 new ColumnSet(PROJECT_CASE_LINK));
 
             var caseRef = project.GetAttributeValue<EntityReference>(PROJECT_CASE_LINK);
+            _trace?.Trace("DayCountService.BuildContext: {0} = {1}",
+                PROJECT_CASE_LINK, caseRef != null ? caseRef.Id.ToString() : "(null)");
+
             if (caseRef == null)
             {
-                _trace?.Trace("DayCountService: Project {0} has no linked case — skipping day count calc.", projectId);
+                _trace?.Trace("DayCountService: Project {0} has no linked case (field '{1}' is null) — skipping day count calc.",
+                    projectId, PROJECT_CASE_LINK);
                 return null;
             }
 
@@ -240,6 +286,8 @@ namespace ADC.MppImport.Services
 
             var caseTypeOsv = caseRecord.GetAttributeValue<OptionSetValue>(CASE_TYPE);
             int caseTypeValue = caseTypeOsv != null ? caseTypeOsv.Value : -1;
+            _trace?.Trace("DayCountService.BuildContext: Case {0}, {1} = {2}",
+                caseRef.Id, CASE_TYPE, caseTypeValue);
 
             int scenario;
             if (Scenario1CaseTypes.Contains(caseTypeValue))
@@ -248,34 +296,36 @@ namespace ADC.MppImport.Services
                 scenario = 2;
             else
             {
-                // Default to Scenario 1 if case type is unrecognised
                 _trace?.Trace("DayCountService: Unrecognised case type {0}, defaulting to Scenario 1.", caseTypeValue);
                 scenario = 1;
             }
 
             DateTime? caseInitiationDate = caseRecord.GetAttributeValue<DateTime?>(CASE_INITIATION_DATE);
 
-            _trace?.Trace("DayCountService: Scenario={0}, CaseType={1}, InitiationDate={2}",
-                scenario, caseTypeValue,
-                caseInitiationDate.HasValue ? caseInitiationDate.Value.ToString("yyyy-MM-dd") : "(not set)");
+            _trace?.Trace("DayCountService.BuildContext: Scenario={0}, CaseType={1}, {2}={3}",
+                scenario, caseTypeValue, CASE_INITIATION_DATE,
+                caseInitiationDate.HasValue ? caseInitiationDate.Value.ToString("yyyy-MM-dd HH:mm:ss") : "(not set)");
 
             // Find milestone tasks
             var appMilestone = FindMilestoneByName(projectId, MILESTONE_APPLICATION_DATE);
             DateTime? appDateFinish = appMilestone?.GetAttributeValue<DateTime?>(TASK_FINISH);
+            _trace?.Trace("DayCountService.BuildContext: '{0}' milestone {1}, finish={2}",
+                MILESTONE_APPLICATION_DATE,
+                appMilestone != null ? "FOUND (id=" + appMilestone.Id + ")" : "NOT FOUND",
+                appDateFinish.HasValue ? appDateFinish.Value.ToString("yyyy-MM-dd") : "(null)");
 
             DateTime? initDateFinish = null;
             if (scenario == 2)
             {
                 var initMilestone = FindMilestoneByName(projectId, MILESTONE_INITIATION_DATE);
                 initDateFinish = initMilestone?.GetAttributeValue<DateTime?>(TASK_FINISH);
+                _trace?.Trace("DayCountService.BuildContext: '{0}' milestone {1}, finish={2}",
+                    MILESTONE_INITIATION_DATE,
+                    initMilestone != null ? "FOUND (id=" + initMilestone.Id + ")" : "NOT FOUND",
+                    initDateFinish.HasValue ? initDateFinish.Value.ToString("yyyy-MM-dd") : "(null)");
             }
 
-            if (appDateFinish == null)
-            {
-                _trace?.Trace("DayCountService: WARNING — '{0}' milestone not found or has no finish date.", MILESTONE_APPLICATION_DATE);
-            }
-
-            return new CalcContext
+            var ctx = new CalcContext
             {
                 ProjectId = projectId,
                 Scenario = scenario,
@@ -283,13 +333,21 @@ namespace ADC.MppImport.Services
                 InitiationDateFinish = initDateFinish?.Date,
                 HasInitiationDate = caseInitiationDate.HasValue
             };
+
+            _trace?.Trace("DayCountService.BuildContext: RESULT — Scenario={0}, AppDateFinish={1}, InitDateFinish={2}, HasInitDate={3}",
+                ctx.Scenario,
+                ctx.ApplicationDateFinish.HasValue ? ctx.ApplicationDateFinish.Value.ToString("yyyy-MM-dd") : "(null)",
+                ctx.InitiationDateFinish.HasValue ? ctx.InitiationDateFinish.Value.ToString("yyyy-MM-dd") : "(null)",
+                ctx.HasInitiationDate);
+
+            return ctx;
         }
 
         /// <summary>
         /// Calculates the day count for a single task given the pre-built context.
         /// Returns null if calculation is not possible (e.g. no reference date).
         /// </summary>
-        private int? CalculateDayCount(Entity task, CalcContext ctx)
+        private decimal? CalculateDayCount(Entity task, CalcContext ctx)
         {
             string taskName = task.GetAttributeValue<string>(TASK_NAME) ?? "";
             DateTime? taskFinish = task.GetAttributeValue<DateTime?>(TASK_FINISH);
@@ -300,26 +358,37 @@ namespace ADC.MppImport.Services
             if (IsApplicationDateMilestone(taskName))
             {
                 if (ctx.Scenario == 1)
-                    return 0; // Reference point for Scenario 1
+                {
+                    _trace?.Trace("DayCountService.Calc: '{0}' is Application date milestone, Scenario 1 → 0", taskName);
+                    return 0m;
+                }
 
                 // Scenario 2: -20 initially, or recalculate relative to initiation date if set
                 if (ctx.HasInitiationDate && ctx.InitiationDateFinish.HasValue && taskFinish.HasValue)
-                    return (int)(taskFinish.Value.Date - ctx.InitiationDateFinish.Value).TotalDays;
+                {
+                    decimal val = (decimal)(taskFinish.Value.Date - ctx.InitiationDateFinish.Value).TotalDays;
+                    _trace?.Trace("DayCountService.Calc: '{0}' is Application date milestone, Scenario 2 with initiation → {1} (finish={2}, initRef={3})",
+                        taskName, val, taskFinish.Value.Date.ToString("yyyy-MM-dd"), ctx.InitiationDateFinish.Value.ToString("yyyy-MM-dd"));
+                    return val;
+                }
 
+                _trace?.Trace("DayCountService.Calc: '{0}' is Application date milestone, Scenario 2 no initiation → {1}",
+                    taskName, APPLICATION_DATE_INITIAL_DAY_COUNT);
                 return APPLICATION_DATE_INITIAL_DAY_COUNT;
             }
 
             // "Initiation date" milestone
             if (IsInitiationDateMilestone(taskName))
             {
-                return 0; // Always 0 — it IS the reference point when present
+                _trace?.Trace("DayCountService.Calc: '{0}' is Initiation date milestone → 0", taskName);
+                return 0m;
             }
 
             // --- Regular tasks ---
 
             if (!taskFinish.HasValue)
             {
-                _trace?.Trace("DayCountService: Task '{0}' has no finish date, skipping.", taskName);
+                _trace?.Trace("DayCountService.Calc: Task '{0}' has no finish date, skipping.", taskName);
                 return null;
             }
 
@@ -327,18 +396,29 @@ namespace ADC.MppImport.Services
             // If Scenario 2 and initiation date is set → use Initiation date milestone finish
             // Otherwise → use Application date milestone finish
             DateTime? referenceDate;
+            string refSource;
             if (ctx.Scenario == 2 && ctx.HasInitiationDate && ctx.InitiationDateFinish.HasValue)
+            {
                 referenceDate = ctx.InitiationDateFinish;
+                refSource = "Initiation date milestone";
+            }
             else
+            {
                 referenceDate = ctx.ApplicationDateFinish;
+                refSource = "Application date milestone";
+            }
 
             if (!referenceDate.HasValue)
             {
-                _trace?.Trace("DayCountService: No reference date available for task '{0}', skipping.", taskName);
+                _trace?.Trace("DayCountService.Calc: No reference date ({0}) available for task '{1}', skipping.", refSource, taskName);
                 return null;
             }
 
-            return (int)(taskFinish.Value.Date - referenceDate.Value).TotalDays;
+            decimal result = (decimal)(taskFinish.Value.Date - referenceDate.Value).TotalDays;
+            _trace?.Trace("DayCountService.Calc: '{0}' finish={1} - ref={2} ({3}) = {4}",
+                taskName, taskFinish.Value.Date.ToString("yyyy-MM-dd"), referenceDate.Value.ToString("yyyy-MM-dd"),
+                refSource, result);
+            return result;
         }
 
         // =====================================================================
@@ -365,7 +445,10 @@ namespace ADC.MppImport.Services
             };
 
             var results = _service.RetrieveMultiple(query);
-            return results.Entities.FirstOrDefault();
+            var found = results.Entities.FirstOrDefault();
+            _trace?.Trace("DayCountService.FindMilestoneByName: '{0}' in project {1} → {2}",
+                milestoneName, projectId, found != null ? "FOUND (id=" + found.Id + ")" : "NOT FOUND");
+            return found;
         }
 
         /// <summary>
@@ -386,6 +469,7 @@ namespace ADC.MppImport.Services
             };
 
             var results = _service.RetrieveMultiple(query);
+            _trace?.Trace("DayCountService.RetrieveAllTasks: project {0} → {1} tasks returned.", projectId, results.Entities.Count);
             return results.Entities.ToList();
         }
 
@@ -409,8 +493,12 @@ namespace ADC.MppImport.Services
 
             var results = _service.RetrieveMultiple(query);
             if (results.Entities.Count > 0)
+            {
+                _trace?.Trace("DayCountService.FindProjectForCase: case {0} → project {1}", caseId, results.Entities[0].Id);
                 return results.Entities[0].Id;
+            }
 
+            _trace?.Trace("DayCountService.FindProjectForCase: case {0} → no project found.", caseId);
             return null;
         }
 

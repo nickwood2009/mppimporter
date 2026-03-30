@@ -14,14 +14,14 @@ namespace ADC.MppImport.Plugins
     ///   When a task's scheduled finish date changes, recalculate its day count.
     ///
     /// Step B — adc_case / Update / Post-Operation / Async
-    ///   Filtering attributes: adc_initiationdate (PLACEHOLDER — update to actual schema name)
+    ///   Filtering attributes: adc_dateofinitiation
     ///   When the initiation date is set/changed on a case, update the "Initiation date"
     ///   milestone's finish date and recalculate all tasks in the linked project.
     /// </summary>
     public class DayCountPlugin : IPlugin
     {
         // PLACEHOLDER — update to match your environment
-        private const string CASE_INITIATION_DATE = "adc_initiationdate";
+        private const string CASE_INITIATION_DATE = "adc_dateofinitiation";
 
         public void Execute(IServiceProvider serviceProvider)
         {

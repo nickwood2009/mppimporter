@@ -49,31 +49,31 @@ namespace ADC.MppImport.Services
         // adc_case fields
         private const string CASE_ENTITY = "adc_case";
         private const string CASE_TYPE = "adc_casetype";                    // PLACEHOLDER — optionset on case
-        private const string CASE_INITIATION_DATE = "adc_initiationdate";   // PLACEHOLDER — datetime on case
+        private const string CASE_INITIATION_DATE = "adc_dateofinitiation";
 
         // msdyn_project fields
         private const string PROJECT_ENTITY = "msdyn_project";
-        private const string PROJECT_CASE_LINK = "adc_parentadccase";       // PLACEHOLDER — lookup to adc_case
+        private const string PROJECT_CASE_LINK = "adc_projectid";
 
         // Case type option set values — Scenario 1 (no initiation date)
         // PLACEHOLDER — replace with actual optionset int values
         private static readonly HashSet<int> Scenario1CaseTypes = new HashSet<int>
         {
-            // Duty Assessment
-            // Accelerated Review
-            // Exemption
+            756360004, // Duty Assessment
+            756360005, // Accelerated Review
+            756360008  // Exemption
         };
 
         // Case type option set values — Scenario 2 (has initiation date)
         // PLACEHOLDER — replace with actual optionset int values
         private static readonly HashSet<int> Scenario2CaseTypes = new HashSet<int>
         {
-            // Dumping Investigation
-            // Subsidy Investigation
-            // Dumping and Subsidy Investigation
-            // Review of Measures
-            // Continuation
-            // Anti-circumvention
+            756360000, // Dumping Investigation
+            756360001, // Subsidy Investigation
+            756360002, // Dumping and Subsidy Investigation
+            756360003, // Review of Measures
+            756360006, // Continuation Inquiry
+            756360007  // Anti-Circumvention
         };
 
         // The fixed day count for the Application date milestone in Scenario 2

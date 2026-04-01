@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Microsoft.Xrm.Sdk.Workflow;
 using ADC.MppImport.Services;
+using System.Collections.Generic;
 
 namespace ADC.MppImport.Workflows
 {
@@ -43,6 +44,8 @@ namespace ADC.MppImport.Workflows
 
         private const int POLL_INTERVAL_SECONDS = 10;
         private const int POLL_MAX_ATTEMPTS = 30; // 5 minutes max
+        private const int TASK_WAIT_INTERVAL_SECONDS = 5;
+        private const int TASK_WAIT_MAX_ATTEMPTS = 12; // 60 seconds max
 
         protected override void ExecuteActivity(CodeActivityContext executionContext)
         {
@@ -195,9 +198,18 @@ namespace ADC.MppImport.Workflows
 
             TracingService.Trace("CloneProject: {0}", finalMessage);
 
-            // Update case with final status + send notification
+            // Update case with final status + recalculate day counts + send notification
             if (copySucceeded)
             {
+                // Wait for tasks to be created by PSS, then recalculate day counts
+                UpdateCaseStatus(caseRef.Id, 1, "Project copied — calculating day counts...");
+                bool dayCountSuccess = WaitForTasksAndRecalc(targetProjectId);
+
+                if (dayCountSuccess)
+                    finalMessage = string.Format("Project cloned and day counts calculated for '{0}'.", targetProjectName);
+                else
+                    finalMessage = string.Format("Project cloned as '{0}' but day count calculation had issues — see trace log.", targetProjectName);
+
                 UpdateCaseStatus(caseRef.Id, 2, finalMessage);
                 if (initiatingUserId.HasValue)
                     SendNotification(initiatingUserId.Value, "Project Clone Complete", finalMessage, NotificationIconType.Success, caseRef.Id);
@@ -212,6 +224,60 @@ namespace ADC.MppImport.Workflows
             NewProject.Set(executionContext, new EntityReference("msdyn_project", targetProjectId));
             Success.Set(executionContext, copySucceeded);
             ResultMessage.Set(executionContext, finalMessage);
+        }
+
+        /// <summary>
+        /// Waits for tasks to appear on the project, then recalculates day counts.
+        /// Returns true if recalc ran successfully.
+        /// </summary>
+        private bool WaitForTasksAndRecalc(Guid projectId)
+        {
+            TracingService.Trace("CloneProject: Waiting for tasks to appear on project {0}...", projectId);
+
+            int taskCount = 0;
+            for (int attempt = 0; attempt < TASK_WAIT_MAX_ATTEMPTS; attempt++)
+            {
+                var query = new QueryExpression("msdyn_projecttask")
+                {
+                    ColumnSet = new ColumnSet(false),
+                    Criteria =
+                    {
+                        Conditions =
+                        {
+                            new ConditionExpression("msdyn_project", ConditionOperator.Equal, projectId)
+                        }
+                    }
+                };
+                var results = OrganizationService.RetrieveMultiple(query);
+                taskCount = results.Entities.Count;
+
+                TracingService.Trace("CloneProject: Task wait {0}/{1} — {2} tasks found.",
+                    attempt + 1, TASK_WAIT_MAX_ATTEMPTS, taskCount);
+
+                if (taskCount > 0)
+                    break;
+
+                System.Threading.Thread.Sleep(TASK_WAIT_INTERVAL_SECONDS * 1000);
+            }
+
+            if (taskCount == 0)
+            {
+                TracingService.Trace("CloneProject: No tasks found after {0}s — skipping day count recalc.",
+                    TASK_WAIT_INTERVAL_SECONDS * TASK_WAIT_MAX_ATTEMPTS);
+                return false;
+            }
+
+            try
+            {
+                var dayCountService = new DayCountService(OrganizationService, TracingService);
+                dayCountService.RecalcAllTasks(projectId);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                TracingService.Trace("CloneProject: Day count recalc failed (non-fatal): {0}", ex.Message);
+                return false;
+            }
         }
 
         private void UpdateCaseStatus(Guid caseId, int importStatus, string message)

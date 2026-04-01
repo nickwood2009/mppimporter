@@ -53,7 +53,7 @@ namespace ADC.MppImport.Services
 
         // msdyn_project fields
         private const string PROJECT_ENTITY = "msdyn_project";
-        private const string PROJECT_CASE_LINK = "adc_projectid";
+        private const string PROJECT_CASE_LINK = "adc_parentadccase";
 
         // Case type option set values — Scenario 1 (no initiation date)
         // PLACEHOLDER — replace with actual optionset int values

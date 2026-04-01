@@ -148,30 +148,58 @@ namespace ADC.MppImport.Services
 
             // 4. Resolve the initiating user's local "today" for the project start date
             //    Without this, PSS defaults to UTC date which is yesterday for UTC+N users before N:00 local time.
-            DateTime? projectStartDate = null;
+            //    ALWAYS falls back to UTC today if timezone resolution fails.
+            // Fallback: Canberra/Sydney = UTC+10 (AEST) or UTC+11 (AEDT).
+            // Use +11 as the safe default so the date is never behind.
+            DateTime projectStartDate = DateTime.UtcNow.AddHours(11).Date;
+            _trace?.Trace("CaseImportService: UTC now = {0:yyyy-MM-dd HH:mm:ss}", DateTime.UtcNow);
+
             if (initiatingUserIdOverride.HasValue)
             {
+                _trace?.Trace("CaseImportService: Resolving timezone for user {0}...", initiatingUserIdOverride.Value);
                 try
                 {
                     var userSettings = _service.Retrieve("usersettings", initiatingUserIdOverride.Value,
                         new ColumnSet("timezonecode"));
-                    int tzCode = userSettings.GetAttributeValue<int>("timezonecode");
-                    _trace?.Trace("CaseImportService: User timezone code = {0}", tzCode);
 
-                    var localTimeReq = new Microsoft.Crm.Sdk.Messages.LocalTimeFromUtcTimeRequest
+                    if (!userSettings.Contains("timezonecode"))
                     {
-                        TimeZoneCode = tzCode,
-                        UtcTime = DateTime.UtcNow
-                    };
-                    var localTimeResp = (Microsoft.Crm.Sdk.Messages.LocalTimeFromUtcTimeResponse)_service.Execute(localTimeReq);
-                    projectStartDate = localTimeResp.LocalTime.Date;
-                    _trace?.Trace("CaseImportService: User local today = {0:yyyy-MM-dd}", projectStartDate.Value);
+                        _trace?.Trace("CaseImportService: usersettings record exists but timezonecode is NULL — using UTC fallback.");
+                    }
+                    else
+                    {
+                        int tzCode = userSettings.GetAttributeValue<int>("timezonecode");
+                        _trace?.Trace("CaseImportService: User timezone code = {0}", tzCode);
+
+                        if (tzCode == 0)
+                        {
+                            _trace?.Trace("CaseImportService: Timezone code is 0 (possibly unset) — using UTC fallback.");
+                        }
+                        else
+                        {
+                            var localTimeReq = new Microsoft.Crm.Sdk.Messages.LocalTimeFromUtcTimeRequest
+                            {
+                                TimeZoneCode = tzCode,
+                                UtcTime = DateTime.UtcNow
+                            };
+                            var localTimeResp = (Microsoft.Crm.Sdk.Messages.LocalTimeFromUtcTimeResponse)_service.Execute(localTimeReq);
+                            projectStartDate = localTimeResp.LocalTime.Date;
+                            _trace?.Trace("CaseImportService: User local today = {0:yyyy-MM-dd}", projectStartDate);
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
-                    _trace?.Trace("CaseImportService: Could not resolve user timezone (non-fatal): {0}", ex.Message);
+                    _trace?.Trace("CaseImportService: Could not resolve user timezone — falling back to UTC today ({0:yyyy-MM-dd}). Error: {1}",
+                        projectStartDate, ex.Message);
                 }
             }
+            else
+            {
+                _trace?.Trace("CaseImportService: No initiating user ID — using UTC today as fallback ({0:yyyy-MM-dd}).", projectStartDate);
+            }
+
+            _trace?.Trace("CaseImportService: Final projectStartDate = {0:yyyy-MM-dd}", projectStartDate);
 
             // 5. Create template project
             string projectName = templateName + " [Template]";

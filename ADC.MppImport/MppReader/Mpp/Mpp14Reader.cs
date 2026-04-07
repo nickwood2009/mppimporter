@@ -441,20 +441,9 @@ namespace ADC.MppImport.MppReader.Mpp
                 else
                     m_file.DiagnosticMessages.Add("Active field: NOT in field map");
 
-                // Diagnostic: dump ALL task field map entries to identify custom fields
                 var knownIndices = new HashSet<int>(
                     Enum.GetValues(typeof(TaskFieldIndex)).Cast<int>());
                 m_file.DiagnosticMessages.Add(string.Format("Task field map: {0} total entries", fm.Items.Count()));
-                foreach (var kvp in fm.Items.OrderBy(k => k.Key))
-                {
-                    string label = knownIndices.Contains(kvp.Key)
-                        ? ((TaskFieldIndex)kvp.Key).ToString()
-                        : "CUSTOM/UNKNOWN";
-                    m_file.DiagnosticMessages.Add(string.Format(
-                        "  FieldIdx={0} ({1}) Loc={2} Cat=0x{3:X2} Block={4} Offset={5} VarKey=0x{6:X8}",
-                        kvp.Key, label, kvp.Value.Location, kvp.Value.Category,
-                        kvp.Value.DataBlockIndex, kvp.Value.DataBlockOffset, kvp.Value.VarDataKey));
-                }
 
                 // Parse field name aliases (user-defined custom column names)
                 // MPP14 stores aliases in TBkndTask/Props stream, not in the project-level Props

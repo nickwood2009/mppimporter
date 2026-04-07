@@ -73,10 +73,17 @@ namespace ADC.MppImport.Workflows
             // Normalize start date to noon UTC to avoid timezone edge issues
             DateTime startDateNormalized = newStartDate.Date.AddHours(12);
 
-            // Read source project name to build target name
+            // Read source project name + calendar fields to replicate on target
             var sourceProject = OrganizationService.Retrieve("msdyn_project", sourceRef.Id,
-                new ColumnSet("msdyn_subject"));
+                new ColumnSet("msdyn_subject", "msdyn_calendarid", "msdyn_workhourtemplate"));
             string sourceName = sourceProject.GetAttributeValue<string>("msdyn_subject") ?? "Project";
+
+            // Capture calendar info from source so we can copy it to target
+            string sourceCalendarId = sourceProject.GetAttributeValue<string>("msdyn_calendarid");
+            var sourceWorkHourTemplate = sourceProject.GetAttributeValue<EntityReference>("msdyn_workhourtemplate");
+            TracingService.Trace("CloneProject: Source calendar ID = {0}, WorkHourTemplate = {1}",
+                sourceCalendarId ?? "(null)",
+                sourceWorkHourTemplate != null ? sourceWorkHourTemplate.Id.ToString() : "(null)");
 
             // Read case details for naming
             var caseRecord = OrganizationService.Retrieve("adc_case", caseRef.Id,
@@ -99,14 +106,40 @@ namespace ADC.MppImport.Workflows
                     NotificationIconType.Info, caseRef.Id);
             }
 
-            // 1. Create empty target project with desired start date
+            // 1. Create empty target project with desired start date + same calendar as source
             var targetProject = new Entity("msdyn_project");
             targetProject["msdyn_subject"] = targetProjectName;
             targetProject["msdyn_scheduledstart"] = startDateNormalized;
             targetProject["adc_parentadccase"] = new EntityReference("adc_case", caseRef.Id);
+            if (!string.IsNullOrEmpty(sourceCalendarId))
+                targetProject["msdyn_calendarid"] = sourceCalendarId;
+            if (sourceWorkHourTemplate != null)
+                targetProject["msdyn_workhourtemplate"] = sourceWorkHourTemplate;
             Guid targetProjectId = OrganizationService.Create(targetProject);
 
             TracingService.Trace("CloneProject: Target project created: {0}", targetProjectId);
+
+            // Verify target project calendar was set correctly
+            try
+            {
+                var targetCheck = OrganizationService.Retrieve("msdyn_project", targetProjectId,
+                    new ColumnSet("msdyn_calendarid", "msdyn_workhourtemplate"));
+                string targetCalId = targetCheck.GetAttributeValue<string>("msdyn_calendarid");
+                var targetWht = targetCheck.GetAttributeValue<EntityReference>("msdyn_workhourtemplate");
+                TracingService.Trace("CloneProject: Target calendar ID = {0}, WorkHourTemplate = {1}",
+                    targetCalId ?? "(null)",
+                    targetWht != null ? targetWht.Id.ToString() : "(null)");
+
+                bool calMatch = (sourceCalendarId ?? "") == (targetCalId ?? "");
+                TracingService.Trace("CloneProject: Calendar match = {0}", calMatch);
+                if (!calMatch)
+                    TracingService.Trace("CloneProject: WARNING — calendar mismatch! Source='{0}', Target='{1}'",
+                        sourceCalendarId ?? "(null)", targetCalId ?? "(null)");
+            }
+            catch (Exception ex)
+            {
+                TracingService.Trace("CloneProject: Calendar verification failed (non-fatal): {0}", ex.Message);
+            }
 
             // Link project to case
             try

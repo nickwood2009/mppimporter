@@ -8,23 +8,20 @@ namespace ADC.MppImport.Services
 {
     /// <summary>
     /// Shared business logic for calculating "Day Count" on project tasks.
-    /// Day Count = calendar days between a task's scheduled finish date and a reference date.
     ///
-    /// Two scenarios based on case type:
+    /// Day Count = datediff(task Finish date, reference date from linked ADC case).
     ///
-    /// Scenario 1 — No Initiation Date (Duty Assessment, Accelerated Review, Exemption):
-    ///   - "Application date" milestone → day count = 0 (reference point)
-    ///   - All other tasks → datediff(task Finish, Application date Finish)
+    /// Reference date rules:
+    ///   - Scenario 1 (Duty Assessment, Accelerated Review, Exemption):
+    ///       → Always uses Original Lodgement Date from the case.
+    ///   - Scenario 2 (Dumping Inv, Subsidy Inv, D&amp;S Inv, Review of Measures,
+    ///                 Continuation Inquiry, Anti-circumvention):
+    ///       → Uses Initiation Date from the case when set.
+    ///       → Falls back to Original Lodgement Date if Initiation Date not yet set.
     ///
-    /// Scenario 2 — Has Initiation Date (Dumping Inv, Subsidy Inv, D&amp;S Inv,
-    ///              Review of Measures, Continuation, Anti-circumvention):
-    ///   - Initially: "Application date" milestone → day count = -20
-    ///   - All other tasks → datediff(task Finish, Application date Finish)
-    ///   - When Initiation date is set on case:
-    ///       • "Initiation date" milestone finish = case initiation date, day count = 0
-    ///       • All tasks recalculated relative to Initiation date milestone finish
-    ///
-    /// Placeholder field names are marked with PLACEHOLDER comments — update as needed.
+    /// Recalculation triggers:
+    ///   1. Task finish date changes → recalc that single task.
+    ///   2. Initiation Date or Original Lodgement Date changes on the case → recalc all tasks.
     /// </summary>
     public class DayCountService
     {
@@ -32,7 +29,7 @@ namespace ADC.MppImport.Services
         private readonly ITracingService _trace;
 
         // =====================================================================
-        // PLACEHOLDER SCHEMA NAMES — update these to match your environment
+        // SCHEMA NAMES
         // =====================================================================
 
         // msdyn_projecttask fields
@@ -42,21 +39,17 @@ namespace ADC.MppImport.Services
         private const string TASK_PROJECT = "msdyn_project";
         private const string TASK_DAY_COUNT = "adc_daycount1";
 
-        // Milestone task names (matched by msdyn_subject)
-        private const string MILESTONE_APPLICATION_DATE = "Application date";
-        private const string MILESTONE_INITIATION_DATE = "Initiation date";
-
         // adc_case fields
         private const string CASE_ENTITY = "adc_case";
-        private const string CASE_TYPE = "adc_casetype";                    // PLACEHOLDER — optionset on case
+        private const string CASE_TYPE = "adc_casetype";
         private const string CASE_INITIATION_DATE = "adc_dateofinitiation";
+        private const string CASE_ORIGINAL_LODGEMENT_DATE = "adc_originallodgementdate";
 
         // msdyn_project fields
         private const string PROJECT_ENTITY = "msdyn_project";
         private const string PROJECT_CASE_LINK = "adc_parentadccase";
 
-        // Case type option set values — Scenario 1 (no initiation date)
-        // PLACEHOLDER — replace with actual optionset int values
+        // Case type option set values — Scenario 1 (no initiation date — use Original Lodgement Date)
         private static readonly HashSet<int> Scenario1CaseTypes = new HashSet<int>
         {
             756360004, // Duty Assessment
@@ -64,8 +57,7 @@ namespace ADC.MppImport.Services
             756360008  // Exemption
         };
 
-        // Case type option set values — Scenario 2 (has initiation date)
-        // PLACEHOLDER — replace with actual optionset int values
+        // Case type option set values — Scenario 2 (has initiation date when set)
         private static readonly HashSet<int> Scenario2CaseTypes = new HashSet<int>
         {
             756360000, // Dumping Investigation
@@ -75,10 +67,6 @@ namespace ADC.MppImport.Services
             756360006, // Continuation Inquiry
             756360007  // Anti-Circumvention
         };
-
-        // The fixed day count for the Application date milestone in Scenario 2
-        // before an initiation date is set
-        private const decimal APPLICATION_DATE_INITIAL_DAY_COUNT = -20m;
 
         public DayCountService(IOrganizationService service, ITracingService trace)
         {
@@ -131,12 +119,12 @@ namespace ADC.MppImport.Services
                     var update = new Entity(TASK_ENTITY, taskId);
                     update[TASK_DAY_COUNT] = dayCount.Value;
                     _service.Update(update);
-                    _trace?.Trace("DayCountService: Updated task '{0}' day count: {1} → {2}",
+                    _trace?.Trace("DayCountService: Updated '{0}' day count: {1} → {2}",
                         taskName, existingDayCount, dayCount.Value);
                 }
                 else
                 {
-                    _trace?.Trace("DayCountService: Task '{0}' day count unchanged at {1}, no update needed.",
+                    _trace?.Trace("DayCountService: Task '{0}' day count unchanged at {1}.",
                         taskName, existingDayCount);
                 }
             }
@@ -144,7 +132,7 @@ namespace ADC.MppImport.Services
 
         /// <summary>
         /// Recalculates day count for ALL project tasks in a project.
-        /// Called after import completes, or when initiation date changes on the case.
+        /// Called after clone completes, or when a case date changes.
         /// </summary>
         public void RecalcAllTasks(Guid projectId)
         {
@@ -153,7 +141,7 @@ namespace ADC.MppImport.Services
             var context = BuildContext(projectId);
             if (context == null)
             {
-                _trace?.Trace("DayCountService: BuildContext returned null for project {0}, aborting RecalcAllTasks.", projectId);
+                _trace?.Trace("DayCountService: BuildContext returned null for project {0}, aborting.", projectId);
                 return;
             }
 
@@ -162,13 +150,11 @@ namespace ADC.MppImport.Services
 
             if (tasks.Count == 0)
             {
-                _trace?.Trace("DayCountService: No tasks found for project {0}, nothing to recalculate.", projectId);
+                _trace?.Trace("DayCountService: No tasks found for project {0}.", projectId);
                 return;
             }
 
-            int updated = 0;
-            int skipped = 0;
-            int unchanged = 0;
+            int updated = 0, skipped = 0, unchanged = 0;
             foreach (var task in tasks)
             {
                 string tName = task.GetAttributeValue<string>(TASK_NAME) ?? "(no name)";
@@ -196,20 +182,18 @@ namespace ADC.MppImport.Services
                 }
             }
 
-            _trace?.Trace("DayCountService: RecalcAllTasks complete — {0} updated, {1} unchanged, {2} skipped (no finish/ref date).",
+            _trace?.Trace("DayCountService: RecalcAllTasks complete — {0} updated, {1} unchanged, {2} skipped (no finish date).",
                 updated, unchanged, skipped);
         }
 
         /// <summary>
-        /// Called when initiation date is set/changed on an adc_case.
-        /// Updates the "Initiation date" milestone's finish date and recalculates all tasks.
+        /// Called when Initiation Date or Original Lodgement Date changes on an adc_case.
+        /// Finds linked project and recalculates all tasks.
         /// </summary>
-        public void OnInitiationDateChanged(Guid caseId, DateTime? initiationDate)
+        public void OnCaseDateChanged(Guid caseId)
         {
-            _trace?.Trace("DayCountService.OnInitiationDateChanged: caseId={0}, date={1}",
-                caseId, initiationDate.HasValue ? initiationDate.Value.ToString("yyyy-MM-dd") : "(null)");
+            _trace?.Trace("DayCountService.OnCaseDateChanged: caseId={0}", caseId);
 
-            // Find the linked project
             Guid? projectId = FindProjectForCase(caseId);
             if (!projectId.HasValue)
             {
@@ -217,27 +201,6 @@ namespace ADC.MppImport.Services
                 return;
             }
 
-            if (initiationDate.HasValue)
-            {
-                // Find the "Initiation date" milestone and update its finish date
-                var milestone = FindMilestoneByName(projectId.Value, MILESTONE_INITIATION_DATE);
-                if (milestone != null)
-                {
-                    var milestoneUpdate = new Entity(TASK_ENTITY, milestone.Id);
-                    milestoneUpdate[TASK_FINISH] = initiationDate.Value;
-                    milestoneUpdate[TASK_DAY_COUNT] = 0m;
-                    _service.Update(milestoneUpdate);
-                    _trace?.Trace("DayCountService: Updated Initiation date milestone finish to {0:yyyy-MM-dd}",
-                        initiationDate.Value);
-                }
-                else
-                {
-                    _trace?.Trace("DayCountService: WARNING — Could not find '{0}' milestone in project {1}.",
-                        MILESTONE_INITIATION_DATE, projectId.Value);
-                }
-            }
-
-            // Recalculate all tasks in the project
             RecalcAllTasks(projectId.Value);
         }
 
@@ -246,20 +209,21 @@ namespace ADC.MppImport.Services
         // =====================================================================
 
         /// <summary>
-        /// Holds pre-fetched context needed for day count calculations.
+        /// Pre-fetched context: the reference date from the linked case.
         /// </summary>
         private class CalcContext
         {
             public Guid ProjectId;
-            public int Scenario;                    // 1 or 2
-            public DateTime? ApplicationDateFinish; // Finish date of the "Application date" milestone
-            public DateTime? InitiationDateFinish;  // Finish date of the "Initiation date" milestone (if set)
-            public bool HasInitiationDate;          // Whether the case has an initiation date set
+            public int Scenario;               // 1 or 2
+            public DateTime? ReferenceDate;    // The date to diff against
+            public string ReferenceDateSource; // For tracing: which field was used
         }
 
         /// <summary>
-        /// Builds the calculation context for a project: determines scenario,
-        /// finds milestone dates, checks case initiation date.
+        /// Builds the calculation context for a project:
+        ///   1. Finds linked case
+        ///   2. Determines scenario from case type
+        ///   3. Picks the correct reference date from the case
         /// </summary>
         private CalcContext BuildContext(Guid projectId)
         {
@@ -275,20 +239,26 @@ namespace ADC.MppImport.Services
 
             if (caseRef == null)
             {
-                _trace?.Trace("DayCountService: Project {0} has no linked case (field '{1}' is null) — skipping day count calc.",
-                    projectId, PROJECT_CASE_LINK);
+                _trace?.Trace("DayCountService: Project {0} has no linked case — skipping.", projectId);
                 return null;
             }
 
-            // Determine scenario from case type
+            // Get case fields
             var caseRecord = _service.Retrieve(CASE_ENTITY, caseRef.Id,
-                new ColumnSet(CASE_TYPE, CASE_INITIATION_DATE));
+                new ColumnSet(CASE_TYPE, CASE_INITIATION_DATE, CASE_ORIGINAL_LODGEMENT_DATE));
 
             var caseTypeOsv = caseRecord.GetAttributeValue<OptionSetValue>(CASE_TYPE);
             int caseTypeValue = caseTypeOsv != null ? caseTypeOsv.Value : -1;
-            _trace?.Trace("DayCountService.BuildContext: Case {0}, {1} = {2}",
-                caseRef.Id, CASE_TYPE, caseTypeValue);
 
+            DateTime? initiationDate = caseRecord.GetAttributeValue<DateTime?>(CASE_INITIATION_DATE);
+            DateTime? originalLodgementDate = caseRecord.GetAttributeValue<DateTime?>(CASE_ORIGINAL_LODGEMENT_DATE);
+
+            _trace?.Trace("DayCountService.BuildContext: Case={0}, CaseType={1}, InitiationDate={2}, OriginalLodgementDate={3}",
+                caseRef.Id, caseTypeValue,
+                initiationDate.HasValue ? initiationDate.Value.ToString("yyyy-MM-dd") : "(null)",
+                originalLodgementDate.HasValue ? originalLodgementDate.Value.ToString("yyyy-MM-dd") : "(null)");
+
+            // Determine scenario
             int scenario;
             if (Scenario1CaseTypes.Contains(caseTypeValue))
                 scenario = 1;
@@ -300,156 +270,72 @@ namespace ADC.MppImport.Services
                 scenario = 1;
             }
 
-            DateTime? caseInitiationDate = caseRecord.GetAttributeValue<DateTime?>(CASE_INITIATION_DATE);
+            // Determine reference date:
+            //   Scenario 2 with initiation date set → Initiation Date
+            //   Everything else → Original Lodgement Date
+            DateTime? referenceDate;
+            string refSource;
 
-            _trace?.Trace("DayCountService.BuildContext: Scenario={0}, CaseType={1}, {2}={3}",
-                scenario, caseTypeValue, CASE_INITIATION_DATE,
-                caseInitiationDate.HasValue ? caseInitiationDate.Value.ToString("yyyy-MM-dd HH:mm:ss") : "(not set)");
-
-            // Find milestone tasks
-            var appMilestone = FindMilestoneByName(projectId, MILESTONE_APPLICATION_DATE);
-            DateTime? appDateFinish = appMilestone?.GetAttributeValue<DateTime?>(TASK_FINISH);
-            _trace?.Trace("DayCountService.BuildContext: '{0}' milestone {1}, finish={2}",
-                MILESTONE_APPLICATION_DATE,
-                appMilestone != null ? "FOUND (id=" + appMilestone.Id + ")" : "NOT FOUND",
-                appDateFinish.HasValue ? appDateFinish.Value.ToString("yyyy-MM-dd") : "(null)");
-
-            DateTime? initDateFinish = null;
-            if (scenario == 2)
+            if (scenario == 2 && initiationDate.HasValue)
             {
-                var initMilestone = FindMilestoneByName(projectId, MILESTONE_INITIATION_DATE);
-                initDateFinish = initMilestone?.GetAttributeValue<DateTime?>(TASK_FINISH);
-                _trace?.Trace("DayCountService.BuildContext: '{0}' milestone {1}, finish={2}",
-                    MILESTONE_INITIATION_DATE,
-                    initMilestone != null ? "FOUND (id=" + initMilestone.Id + ")" : "NOT FOUND",
-                    initDateFinish.HasValue ? initDateFinish.Value.ToString("yyyy-MM-dd") : "(null)");
+                referenceDate = initiationDate.Value.Date;
+                refSource = CASE_INITIATION_DATE;
+            }
+            else
+            {
+                referenceDate = originalLodgementDate.HasValue ? originalLodgementDate.Value.Date : (DateTime?)null;
+                refSource = CASE_ORIGINAL_LODGEMENT_DATE;
             }
 
-            var ctx = new CalcContext
+            _trace?.Trace("DayCountService.BuildContext: RESULT — Scenario={0}, ReferenceDate={1} (from {2})",
+                scenario,
+                referenceDate.HasValue ? referenceDate.Value.ToString("yyyy-MM-dd") : "(null)",
+                refSource);
+
+            if (!referenceDate.HasValue)
+            {
+                _trace?.Trace("DayCountService: WARNING — reference date is null ({0}), day counts cannot be calculated.", refSource);
+            }
+
+            return new CalcContext
             {
                 ProjectId = projectId,
                 Scenario = scenario,
-                ApplicationDateFinish = appDateFinish?.Date,
-                InitiationDateFinish = initDateFinish?.Date,
-                HasInitiationDate = caseInitiationDate.HasValue
+                ReferenceDate = referenceDate,
+                ReferenceDateSource = refSource
             };
-
-            _trace?.Trace("DayCountService.BuildContext: RESULT — Scenario={0}, AppDateFinish={1}, InitDateFinish={2}, HasInitDate={3}",
-                ctx.Scenario,
-                ctx.ApplicationDateFinish.HasValue ? ctx.ApplicationDateFinish.Value.ToString("yyyy-MM-dd") : "(null)",
-                ctx.InitiationDateFinish.HasValue ? ctx.InitiationDateFinish.Value.ToString("yyyy-MM-dd") : "(null)",
-                ctx.HasInitiationDate);
-
-            return ctx;
         }
 
         /// <summary>
-        /// Calculates the day count for a single task given the pre-built context.
-        /// Returns null if calculation is not possible (e.g. no reference date).
+        /// Calculates day count for a single task: datediff(task finish, reference date).
+        /// Returns null if task has no finish date or no reference date is available.
         /// </summary>
         private decimal? CalculateDayCount(Entity task, CalcContext ctx)
         {
             string taskName = task.GetAttributeValue<string>(TASK_NAME) ?? "";
             DateTime? taskFinish = task.GetAttributeValue<DateTime?>(TASK_FINISH);
 
-            // --- Handle special milestone tasks ---
-
-            // "Application date" milestone
-            if (IsApplicationDateMilestone(taskName))
-            {
-                if (ctx.Scenario == 1)
-                {
-                    _trace?.Trace("DayCountService.Calc: '{0}' is Application date milestone, Scenario 1 → 0", taskName);
-                    return 0m;
-                }
-
-                // Scenario 2: -20 initially, or recalculate relative to initiation date if set
-                if (ctx.HasInitiationDate && ctx.InitiationDateFinish.HasValue && taskFinish.HasValue)
-                {
-                    decimal val = (decimal)(taskFinish.Value.Date - ctx.InitiationDateFinish.Value).TotalDays;
-                    _trace?.Trace("DayCountService.Calc: '{0}' is Application date milestone, Scenario 2 with initiation → {1} (finish={2}, initRef={3})",
-                        taskName, val, taskFinish.Value.Date.ToString("yyyy-MM-dd"), ctx.InitiationDateFinish.Value.ToString("yyyy-MM-dd"));
-                    return val;
-                }
-
-                _trace?.Trace("DayCountService.Calc: '{0}' is Application date milestone, Scenario 2 no initiation → {1}",
-                    taskName, APPLICATION_DATE_INITIAL_DAY_COUNT);
-                return APPLICATION_DATE_INITIAL_DAY_COUNT;
-            }
-
-            // "Initiation date" milestone
-            if (IsInitiationDateMilestone(taskName))
-            {
-                _trace?.Trace("DayCountService.Calc: '{0}' is Initiation date milestone → 0", taskName);
-                return 0m;
-            }
-
-            // --- Regular tasks ---
-
             if (!taskFinish.HasValue)
             {
-                _trace?.Trace("DayCountService.Calc: Task '{0}' has no finish date, skipping.", taskName);
+                _trace?.Trace("DayCountService.Calc: '{0}' has no finish date, skipping.", taskName);
                 return null;
             }
 
-            // Determine the reference date:
-            // If Scenario 2 and initiation date is set → use Initiation date milestone finish
-            // Otherwise → use Application date milestone finish
-            DateTime? referenceDate;
-            string refSource;
-            if (ctx.Scenario == 2 && ctx.HasInitiationDate && ctx.InitiationDateFinish.HasValue)
+            if (!ctx.ReferenceDate.HasValue)
             {
-                referenceDate = ctx.InitiationDateFinish;
-                refSource = "Initiation date milestone";
-            }
-            else
-            {
-                referenceDate = ctx.ApplicationDateFinish;
-                refSource = "Application date milestone";
-            }
-
-            if (!referenceDate.HasValue)
-            {
-                _trace?.Trace("DayCountService.Calc: No reference date ({0}) available for task '{1}', skipping.", refSource, taskName);
+                _trace?.Trace("DayCountService.Calc: No reference date for '{0}', skipping.", taskName);
                 return null;
             }
 
-            decimal result = (decimal)(taskFinish.Value.Date - referenceDate.Value).TotalDays;
-            _trace?.Trace("DayCountService.Calc: '{0}' finish={1} - ref={2} ({3}) = {4}",
-                taskName, taskFinish.Value.Date.ToString("yyyy-MM-dd"), referenceDate.Value.ToString("yyyy-MM-dd"),
-                refSource, result);
+            decimal result = (decimal)(taskFinish.Value.Date - ctx.ReferenceDate.Value).TotalDays;
+            _trace?.Trace("DayCountService.Calc: '{0}' = {1:yyyy-MM-dd} - {2:yyyy-MM-dd} ({3}) = {4}",
+                taskName, taskFinish.Value.Date, ctx.ReferenceDate.Value, ctx.ReferenceDateSource, result);
             return result;
         }
 
         // =====================================================================
         // HELPERS
         // =====================================================================
-
-        /// <summary>
-        /// Finds a milestone task in a project by matching msdyn_subject (case-insensitive).
-        /// </summary>
-        private Entity FindMilestoneByName(Guid projectId, string milestoneName)
-        {
-            var query = new QueryExpression(TASK_ENTITY)
-            {
-                ColumnSet = new ColumnSet(TASK_NAME, TASK_FINISH, TASK_DAY_COUNT),
-                Criteria =
-                {
-                    Conditions =
-                    {
-                        new ConditionExpression(TASK_PROJECT, ConditionOperator.Equal, projectId),
-                        new ConditionExpression(TASK_NAME, ConditionOperator.Equal, milestoneName)
-                    }
-                },
-                TopCount = 1
-            };
-
-            var results = _service.RetrieveMultiple(query);
-            var found = results.Entities.FirstOrDefault();
-            _trace?.Trace("DayCountService.FindMilestoneByName: '{0}' in project {1} → {2}",
-                milestoneName, projectId, found != null ? "FOUND (id=" + found.Id + ")" : "NOT FOUND");
-            return found;
-        }
 
         /// <summary>
         /// Retrieves all tasks for a project.
@@ -476,7 +362,7 @@ namespace ADC.MppImport.Services
         /// <summary>
         /// Finds the project linked to a case via adc_parentadccase.
         /// </summary>
-        private Guid? FindProjectForCase(Guid caseId)
+        public Guid? FindProjectForCase(Guid caseId)
         {
             var query = new QueryExpression(PROJECT_ENTITY)
             {
@@ -500,16 +386,6 @@ namespace ADC.MppImport.Services
 
             _trace?.Trace("DayCountService.FindProjectForCase: case {0} → no project found.", caseId);
             return null;
-        }
-
-        private static bool IsApplicationDateMilestone(string taskName)
-        {
-            return string.Equals(taskName, MILESTONE_APPLICATION_DATE, StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool IsInitiationDateMilestone(string taskName)
-        {
-            return string.Equals(taskName, MILESTONE_INITIATION_DATE, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

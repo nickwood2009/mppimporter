@@ -1,7 +1,7 @@
 using System;
 using System.Activities;
 using Microsoft.Xrm.Sdk;
-using Microsoft.Xrm.Sdk.Query;
+
 using Microsoft.Xrm.Sdk.Workflow;
 using ADC.MppImport.Services;
 
@@ -51,15 +51,17 @@ namespace ADC.MppImport.Workflows
             else if (caseRef != null)
             {
                 TracingService.Trace("RecalcDayCountsActivity: Case input provided: {0} — resolving linked project...", caseRef.Id);
-                projectId = ResolveProjectFromCase(caseRef.Id);
-                if (projectId == Guid.Empty)
+                var svc = new DayCountService(OrganizationService, TracingService);
+                var resolved = svc.FindProjectForCase(caseRef.Id);
+                if (!resolved.HasValue)
                 {
-                    string msg = string.Format("No project linked to case {0} (via adc_projectid lookup).", caseRef.Id);
+                    string msg = string.Format("No project linked to case {0} (via adc_parentadccase).", caseRef.Id);
                     TracingService.Trace("RecalcDayCountsActivity: {0}", msg);
                     Success.Set(executionContext, false);
                     ResultMessage.Set(executionContext, msg);
                     return;
                 }
+                projectId = resolved.Value;
                 TracingService.Trace("RecalcDayCountsActivity: Resolved project {0} from case.", projectId);
             }
             else
@@ -84,27 +86,5 @@ namespace ADC.MppImport.Workflows
             }
         }
 
-        /// <summary>
-        /// Looks up the project linked to a case via the adc_projectid lookup on adc_case.
-        /// </summary>
-        private Guid ResolveProjectFromCase(Guid caseId)
-        {
-            try
-            {
-                var caseRecord = OrganizationService.Retrieve("adc_case", caseId,
-                    new ColumnSet("adc_projectid"));
-                var projectRef = caseRecord.GetAttributeValue<EntityReference>("adc_projectid");
-                if (projectRef != null)
-                {
-                    TracingService.Trace("RecalcDayCountsActivity: Case {0} has adc_projectid = {1}", caseId, projectRef.Id);
-                    return projectRef.Id;
-                }
-            }
-            catch (Exception ex)
-            {
-                TracingService.Trace("RecalcDayCountsActivity: Error resolving project from case: {0}", ex.Message);
-            }
-            return Guid.Empty;
-        }
     }
 }

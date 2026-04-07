@@ -46,6 +46,13 @@ namespace ADC.MppImport.Services
             ProjectFile project = reader.Read(mppBytes);
             _trace?.Trace("Parsed: {0} tasks, {1} resources", project.Tasks.Count, project.Resources.Count);
 
+            // If no explicit start date override, use the MPP file's own project start date
+            if (!projectStartDate.HasValue && project.ProjectProperties.StartDate.HasValue)
+            {
+                projectStartDate = project.ProjectProperties.StartDate.Value;
+                _trace?.Trace("Using MPP file start date: {0:o}", projectStartDate.Value);
+            }
+
             // Dump reader diagnostics (CF-KEY, alias parsing, etc.)
             foreach (var msg in project.DiagnosticMessages)
                 _trace?.Trace("  {0}", msg);

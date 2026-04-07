@@ -60,8 +60,8 @@ namespace ADC.MppImport.Services
                 }
                 if (earliest.HasValue)
                 {
-                    projectStartDate = earliest.Value.Date;
-                    _trace?.Trace("Using earliest MPP task start date: {0:yyyy-MM-dd}", projectStartDate.Value);
+                    projectStartDate = earliest.Value.Date.AddHours(12); // noon UTC to avoid off-by-one in UTC+ zones
+                    _trace?.Trace("Using earliest MPP task start date: {0:yyyy-MM-dd} (noon UTC)", projectStartDate.Value);
                 }
             }
 

@@ -61,6 +61,8 @@ namespace ADC.MppImport.Services
                 if (earliest.HasValue)
                 {
                     projectStartDate = earliest.Value.Date.AddHours(12); // noon UTC to avoid off-by-one in UTC+ zones
+                    _trace?.Trace("[DATE-DIAG] earliest.Value={0:o} Kind={1}", earliest.Value, earliest.Value.Kind);
+                    _trace?.Trace("[DATE-DIAG] Storing on job record: {0:o} Kind={1}", projectStartDate.Value, projectStartDate.Value.Kind);
                     _trace?.Trace("Using earliest MPP task start date: {0:yyyy-MM-dd} (noon UTC)", projectStartDate.Value);
                 }
             }
@@ -344,11 +346,14 @@ namespace ADC.MppImport.Services
                 DateTime? projectStartDate = job.GetAttributeValue<DateTime?>(ImportJobFields.ProjectStartDate);
                 if (projectStartDate.HasValue)
                 {
-                    _trace?.Trace("Setting project start date: {0:o}", projectStartDate.Value);
+                    _trace?.Trace("[DATE-DIAG] Raw from job record: {0:o}  Kind={1}  Ticks={2}",
+                        projectStartDate.Value, projectStartDate.Value.Kind, projectStartDate.Value.Ticks);
+                    var sendValue = projectStartDate.Value;
+                    _trace?.Trace("[DATE-DIAG] Sending to PSS msdyn_scheduledstart: {0:o}  Kind={1}", sendValue, sendValue.Kind);
 
                     string startOsId = CreateOperationSet(projectId, "Set project start date");
                     var projectUpdate = new Entity("msdyn_project", projectId);
-                    projectUpdate["msdyn_scheduledstart"] = projectStartDate.Value;
+                    projectUpdate["msdyn_scheduledstart"] = sendValue;
                     PssUpdate(projectUpdate, startOsId);
                     ExecuteOperationSet(startOsId);
 

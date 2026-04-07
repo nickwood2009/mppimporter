@@ -11,7 +11,7 @@ namespace ADC.MppImport.MppReader.Mpp
     /// </summary>
     public static class MppUtility
     {
-        private static readonly DateTime EpochDate = new DateTime(1984, 1, 1);
+        private static readonly DateTime EpochDate = new DateTime(1983, 12, 31);
         private const long MsPerMinute = 60000;
         private const int DurationUnitsMask = 0xFF;
 

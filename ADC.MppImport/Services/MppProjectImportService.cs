@@ -60,11 +60,23 @@ namespace ADC.MppImport.Services
             ProjectFile project = reader.Read(mppBytes);
             _trace?.Trace("MPP parsed: {0} tasks, {1} resources", project.Tasks.Count, project.Resources.Count);
 
-            // If no explicit start date override, use the MPP file's own project start date
-            if (!projectStartDate.HasValue && project.ProjectProperties.StartDate.HasValue)
+            // If no explicit start date override, derive from the earliest task Start in the MPP
+            if (!projectStartDate.HasValue)
             {
-                projectStartDate = project.ProjectProperties.StartDate.Value;
-                _trace?.Trace("Using MPP file start date: {0:o}", projectStartDate.Value);
+                DateTime? earliest = null;
+                foreach (var t in project.Tasks)
+                {
+                    if (t.UniqueID.HasValue && (t.Active ?? true) && t.Start.HasValue)
+                    {
+                        if (!earliest.HasValue || t.Start.Value < earliest.Value)
+                            earliest = t.Start.Value;
+                    }
+                }
+                if (earliest.HasValue)
+                {
+                    projectStartDate = earliest.Value.Date;
+                    _trace?.Trace("Using earliest MPP task start date: {0:yyyy-MM-dd}", projectStartDate.Value);
+                }
             }
 
             if (project.Tasks.Count == 0)

@@ -70,20 +70,29 @@ namespace ADC.MppImport.Workflows
             if (wfCtx != null)
                 initiatingUserId = wfCtx.InitiatingUserId;
 
-            // Normalize start date to noon UTC to avoid timezone edge issues
-            DateTime startDateNormalized = newStartDate.Date.AddHours(12);
 
-            // Read source project name + calendar fields to replicate on target
+            // Read source project name + calendar + start time fields to replicate on target
             var sourceProject = OrganizationService.Retrieve("msdyn_project", sourceRef.Id,
-                new ColumnSet("msdyn_subject", "msdyn_calendarid", "msdyn_workhourtemplate"));
+                new ColumnSet("msdyn_subject", "msdyn_calendarid", "msdyn_workhourtemplate", "msdyn_scheduledstart"));
             string sourceName = sourceProject.GetAttributeValue<string>("msdyn_subject") ?? "Project";
 
-            // Capture calendar info from source so we can copy it to target
+            // Capture calendar + start-time info from source so we can replicate on target
             string sourceCalendarId = sourceProject.GetAttributeValue<string>("msdyn_calendarid");
             var sourceWorkHourTemplate = sourceProject.GetAttributeValue<EntityReference>("msdyn_workhourtemplate");
+            var sourceStart = sourceProject.GetAttributeValue<DateTime?>("msdyn_scheduledstart");
             TracingService.Trace("CloneProject: Source calendar ID = {0}, WorkHourTemplate = {1}",
                 sourceCalendarId ?? "(null)",
                 sourceWorkHourTemplate != null ? sourceWorkHourTemplate.Id.ToString() : "(null)");
+            TracingService.Trace("CloneProject: Source scheduledstart = {0}",
+                sourceStart.HasValue ? sourceStart.Value.ToString("o") : "(null)");
+
+            // Use source project's start-time-of-day so PSS anchors tasks at same hour (e.g. 9 AM)
+            // Fallback to midnight UTC if source has no start (Dataverse will snap to calendar working-hours start)
+            int startHour = sourceStart.HasValue ? sourceStart.Value.Hour : 0;
+            int startMinute = sourceStart.HasValue ? sourceStart.Value.Minute : 0;
+            DateTime startDateNormalized = newStartDate.Date.AddHours(startHour).AddMinutes(startMinute);
+            TracingService.Trace("CloneProject: Target start = {0:o} (hour={1}, min={2} from source)",
+                startDateNormalized, startHour, startMinute);
 
             // Read case details for naming
             var caseRecord = OrganizationService.Retrieve("adc_case", caseRef.Id,
@@ -106,35 +115,41 @@ namespace ADC.MppImport.Workflows
                     NotificationIconType.Info, caseRef.Id);
             }
 
-            // 1. Create empty target project with desired start date + same calendar as source
+            // 1. Create empty target project with desired start date + same work-hour template as source
+            //    Do NOT copy msdyn_calendarid — each project needs its own calendar record;
+            //    setting msdyn_workhourtemplate tells Dataverse which template to generate the calendar from.
             var targetProject = new Entity("msdyn_project");
             targetProject["msdyn_subject"] = targetProjectName;
             targetProject["msdyn_scheduledstart"] = startDateNormalized;
             targetProject["adc_parentadccase"] = new EntityReference("adc_case", caseRef.Id);
-            if (!string.IsNullOrEmpty(sourceCalendarId))
-                targetProject["msdyn_calendarid"] = sourceCalendarId;
             if (sourceWorkHourTemplate != null)
                 targetProject["msdyn_workhourtemplate"] = sourceWorkHourTemplate;
             Guid targetProjectId = OrganizationService.Create(targetProject);
 
             TracingService.Trace("CloneProject: Target project created: {0}", targetProjectId);
 
-            // Verify target project calendar was set correctly
+            // Verify target project calendar + start time were set correctly
             try
             {
                 var targetCheck = OrganizationService.Retrieve("msdyn_project", targetProjectId,
-                    new ColumnSet("msdyn_calendarid", "msdyn_workhourtemplate"));
+                    new ColumnSet("msdyn_calendarid", "msdyn_workhourtemplate", "msdyn_scheduledstart"));
                 string targetCalId = targetCheck.GetAttributeValue<string>("msdyn_calendarid");
                 var targetWht = targetCheck.GetAttributeValue<EntityReference>("msdyn_workhourtemplate");
-                TracingService.Trace("CloneProject: Target calendar ID = {0}, WorkHourTemplate = {1}",
+                var targetStart = targetCheck.GetAttributeValue<DateTime?>("msdyn_scheduledstart");
+                TracingService.Trace("CloneProject: Target calendar ID = {0}, WorkHourTemplate = {1}, Start = {2}",
                     targetCalId ?? "(null)",
-                    targetWht != null ? targetWht.Id.ToString() : "(null)");
+                    targetWht != null ? targetWht.Id.ToString() : "(null)",
+                    targetStart.HasValue ? targetStart.Value.ToString("o") : "(null)");
 
-                bool calMatch = (sourceCalendarId ?? "") == (targetCalId ?? "");
-                TracingService.Trace("CloneProject: Calendar match = {0}", calMatch);
-                if (!calMatch)
-                    TracingService.Trace("CloneProject: WARNING — calendar mismatch! Source='{0}', Target='{1}'",
-                        sourceCalendarId ?? "(null)", targetCalId ?? "(null)");
+                // Work-hour template match is what matters (calendarid will differ since each project gets its own copy)
+                bool whtMatch = (sourceWorkHourTemplate == null && targetWht == null)
+                    || (sourceWorkHourTemplate != null && targetWht != null
+                        && sourceWorkHourTemplate.Id == targetWht.Id);
+                TracingService.Trace("CloneProject: WorkHourTemplate match = {0}", whtMatch);
+                if (!whtMatch)
+                    TracingService.Trace("CloneProject: WARNING — WorkHourTemplate mismatch! Source='{0}', Target='{1}'",
+                        sourceWorkHourTemplate != null ? sourceWorkHourTemplate.Id.ToString() : "(null)",
+                        targetWht != null ? targetWht.Id.ToString() : "(null)");
             }
             catch (Exception ex)
             {

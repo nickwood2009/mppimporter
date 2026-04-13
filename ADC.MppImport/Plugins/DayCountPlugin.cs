@@ -28,7 +28,8 @@ namespace ADC.MppImport.Plugins
             var tracingService = (ITracingService)serviceProvider.GetService(typeof(ITracingService));
             var context = (IPluginExecutionContext)serviceProvider.GetService(typeof(IPluginExecutionContext));
             var serviceFactory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
-            var service = serviceFactory.CreateOrganizationService(context.UserId);
+            // Use SYSTEM context — PSS service account may lack privileges on custom entities (adc_case)
+            var service = serviceFactory.CreateOrganizationService(null);
 
             Entity target = null;
             if (context.InputParameters.Contains("Target") && context.InputParameters["Target"] is Entity)
@@ -40,7 +41,7 @@ namespace ADC.MppImport.Plugins
                 return;
             }
 
-            if (context.Depth > 10)
+            if (context.Depth > 50)
             {
                 tracingService.Trace("DayCountPlugin: Depth {0} exceeds limit, skipping.", context.Depth);
                 return;

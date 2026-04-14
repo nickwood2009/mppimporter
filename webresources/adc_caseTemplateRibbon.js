@@ -18,7 +18,7 @@ ADC.CaseTemplateRibbon = ADC.CaseTemplateRibbon || {};
     "use strict";
 
     // Custom Action unique name (bound to adc_adccasetemplate entity)
-    var IMPORT_ACTION_NAME = "adc_ImportMppTemplate";
+    var IMPORT_ACTION_NAME = "adc_CaseTemplateUpsertTemplateProjectAction";
 
     var NOTIFICATION_ID = "template_import";
 
@@ -155,8 +155,11 @@ ADC.CaseTemplateRibbon = ADC.CaseTemplateRibbon || {};
 
     /**
      * Enable rule — only enable the button when:
+     *   - User has PO Business Admin or System Administrator role
      *   - The record is saved (not a new unsaved record)
      *   - Import is not already in progress
+     *
+     * Returns a Promise (Ribbon Workbench supports async enable rules).
      */
     ADC.CaseTemplateRibbon.enableImportButton = function (primaryControl) {
         var formContext = primaryControl;
@@ -171,7 +174,8 @@ ADC.CaseTemplateRibbon = ADC.CaseTemplateRibbon || {};
             if (status === 0 || status === 1) return false; // Queued or Processing
         }
 
-        return true;
+        // Check security role (async — returns Promise<boolean>)
+        return userHasAllowedRole();
     };
 
     // ──────────────────────────────────────────────────────────
@@ -182,8 +186,8 @@ ADC.CaseTemplateRibbon = ADC.CaseTemplateRibbon || {};
     // *** UPDATE GUIDs with the actual values from your environment ***
     // GUIDs are preserved across environments when exported/imported via solutions.
     var ALLOWED_ROLES = [
-        { id: "00000000-0000-0000-0000-000000000000", name: "PO Business Admin" },
-        { id: "00000000-0000-0000-0000-000000000000", name: "System Administrator" }
+        { id: "ac8badca-3f0d-f111-8407-000d3a794729", name: "ADC PO Business Admin" },
+        { id: "4283f8d0-b4bf-e611-80fd-c4346bc5a22c", name: "System Administrator" }
     ];
     var PLACEHOLDER_GUID = "00000000-0000-0000-0000-000000000000";
     var _hasRoleCache = null; // cache result for the session
@@ -244,20 +248,5 @@ ADC.CaseTemplateRibbon = ADC.CaseTemplateRibbon || {};
         });
     }
 
-    /**
-     * Display rule for Ribbon Workbench — controls button VISIBILITY.
-     * Returns true if the user has "PO Business Admin" or "System Administrator".
-     *
-     * Ribbon Workbench setup:
-     *   - Add a Display Rule of type "Custom Rule"
-     *   - Library: adc_caseTemplateRibbon
-     *   - FunctionName: ADC.CaseTemplateRibbon.isAllowedRole
-     *   - CrmParameter: PrimaryControl
-     */
-    ADC.CaseTemplateRibbon.isAllowedRole = function () {
-        return userHasAllowedRole().then(function (hasRole) {
-            return hasRole;
-        });
-    };
 
 })();

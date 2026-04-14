@@ -6,9 +6,10 @@
  *   - Add a custom button to the adc_adccasetemplate form command bar
  *   - Command action: ADC.CaseTemplateRibbon.importTemplate
  *   - CrmParameter: PrimaryControl
+ *   - Display Rule: ADC.CaseTemplateRibbon.isAllowedRole (PO Business Admin or System Administrator)
  *
- * IMPORTANT: Update IMPORT_TEMPLATE_WORKFLOW_ID with the actual workflow GUID
- * from your environment (Processes > Import Template > URL contains the id).
+ * Calls the "adc_ImportMppTemplate" Custom Action (bound to adc_adccasetemplate).
+ * The old on-demand workflow can be deactivated/deleted.
  */
 var ADC = ADC || {};
 ADC.CaseTemplateRibbon = ADC.CaseTemplateRibbon || {};
@@ -16,8 +17,8 @@ ADC.CaseTemplateRibbon = ADC.CaseTemplateRibbon || {};
 (function () {
     "use strict";
 
-    // *** UPDATE THIS with your actual workflow ID ***
-    var IMPORT_TEMPLATE_WORKFLOW_ID = "a89e3a89-af21-f111-8342-000d3a794a10";
+    // Custom Action unique name (bound to adc_adccasetemplate entity)
+    var IMPORT_ACTION_NAME = "adc_ImportMppTemplate";
 
     var NOTIFICATION_ID = "template_import";
 
@@ -30,6 +31,20 @@ ADC.CaseTemplateRibbon = ADC.CaseTemplateRibbon || {};
         var formContext = primaryControl;
         var recordId = formContext.data.entity.getId().replace(/[{}]/g, "");
 
+        // Guard — block if user doesn't have an allowed role
+        userHasAllowedRole().then(function (hasRole) {
+            if (!hasRole) {
+                Xrm.Navigation.openAlertDialog({
+                    title: "Access Denied",
+                    text: "You must have the 'PO Business Admin' or 'System Administrator' security role to run this import."
+                });
+                return;
+            }
+            _runImport(formContext, recordId);
+        });
+    };
+
+    function _runImport(formContext, recordId) {
         // Confirm with user
         Xrm.Navigation.openConfirmDialog({
             title: "Import Template Project",
@@ -41,11 +56,11 @@ ADC.CaseTemplateRibbon = ADC.CaseTemplateRibbon || {};
             formContext.ui.setFormNotification(
                 "Starting template project import...", "INFO", NOTIFICATION_ID);
 
-            // Execute the workflow via Web API
+            // Execute the bound Custom Action via Web API
             var requestUrl = Xrm.Utility.getGlobalContext().getClientUrl() +
-                "/api/data/v9.2/workflows(" + IMPORT_TEMPLATE_WORKFLOW_ID + ")/Microsoft.Dynamics.CRM.ExecuteWorkflow";
+                "/api/data/v9.2/adc_adccasetemplates(" + recordId + ")/Microsoft.Dynamics.CRM." + IMPORT_ACTION_NAME;
 
-            var requestBody = JSON.stringify({ EntityId: recordId });
+            var requestBody = JSON.stringify({});
 
             var req = new XMLHttpRequest();
             req.open("POST", requestUrl, true);
@@ -88,7 +103,7 @@ ADC.CaseTemplateRibbon = ADC.CaseTemplateRibbon || {};
 
             req.send(requestBody);
         });
-    };
+    }
 
     var _pollId = null;
     var POLL_INTERVAL_MS = 5000; // 5 seconds
@@ -157,6 +172,92 @@ ADC.CaseTemplateRibbon = ADC.CaseTemplateRibbon || {};
         }
 
         return true;
+    };
+
+    // ──────────────────────────────────────────────────────────
+    // Security role check — "PO Business Admin" or "System Administrator"
+    // ──────────────────────────────────────────────────────────
+
+    // Allowed roles — checked by GUID first, falls back to name if GUID is placeholder.
+    // *** UPDATE GUIDs with the actual values from your environment ***
+    // GUIDs are preserved across environments when exported/imported via solutions.
+    var ALLOWED_ROLES = [
+        { id: "00000000-0000-0000-0000-000000000000", name: "PO Business Admin" },
+        { id: "00000000-0000-0000-0000-000000000000", name: "System Administrator" }
+    ];
+    var PLACEHOLDER_GUID = "00000000-0000-0000-0000-000000000000";
+    var _hasRoleCache = null; // cache result for the session
+
+    /**
+     * Checks whether the current user has any of the allowed security roles.
+     * Tries matching by role GUID first; if the GUID is still a placeholder,
+     * falls back to matching by name.
+     * Result is cached so subsequent calls don't re-query.
+     * @returns {Promise<boolean>}
+     */
+    function userHasAllowedRole() {
+        if (_hasRoleCache !== null) {
+            return Promise.resolve(_hasRoleCache);
+        }
+
+        var userId = Xrm.Utility.getGlobalContext().userSettings.userId
+            .replace(/[{}]/g, "");
+        var clientUrl = Xrm.Utility.getGlobalContext().getClientUrl();
+
+        // Build OData filter: match by ID or name for each allowed role
+        var filters = [];
+        for (var i = 0; i < ALLOWED_ROLES.length; i++) {
+            var role = ALLOWED_ROLES[i];
+            if (role.id && role.id !== PLACEHOLDER_GUID) {
+                filters.push("roleid eq " + role.id);
+            } else {
+                filters.push("name eq '" + encodeURIComponent(role.name) + "'");
+            }
+        }
+
+        var url = clientUrl +
+            "/api/data/v9.2/systemusers(" + userId + ")/systemuserroles_association" +
+            "?$select=roleid,name&$filter=" + filters.join(" or ");
+
+        return new Promise(function (resolve) {
+            var req = new XMLHttpRequest();
+            req.open("GET", url, true);
+            req.setRequestHeader("OData-MaxVersion", "4.0");
+            req.setRequestHeader("OData-Version", "4.0");
+            req.setRequestHeader("Accept", "application/json");
+
+            req.onreadystatechange = function () {
+                if (req.readyState !== 4) return;
+                if (req.status === 200) {
+                    try {
+                        var data = JSON.parse(req.responseText);
+                        _hasRoleCache = data.value && data.value.length > 0;
+                    } catch (e) {
+                        _hasRoleCache = false;
+                    }
+                } else {
+                    _hasRoleCache = false;
+                }
+                resolve(_hasRoleCache);
+            };
+            req.send();
+        });
+    }
+
+    /**
+     * Display rule for Ribbon Workbench — controls button VISIBILITY.
+     * Returns true if the user has "PO Business Admin" or "System Administrator".
+     *
+     * Ribbon Workbench setup:
+     *   - Add a Display Rule of type "Custom Rule"
+     *   - Library: adc_caseTemplateRibbon
+     *   - FunctionName: ADC.CaseTemplateRibbon.isAllowedRole
+     *   - CrmParameter: PrimaryControl
+     */
+    ADC.CaseTemplateRibbon.isAllowedRole = function () {
+        return userHasAllowedRole().then(function (hasRole) {
+            return hasRole;
+        });
     };
 
 })();

@@ -36,7 +36,7 @@ ADC.CaseTemplateRibbon = ADC.CaseTemplateRibbon || {};
             if (!hasRole) {
                 Xrm.Navigation.openAlertDialog({
                     title: "Access Denied",
-                    text: "You must have the 'PO Business Admin' or 'System Administrator' security role to run this import."
+                    text: "You must have the 'ADC PO Business Admin' or 'System Administrator' security role to run this import."
                 });
                 return;
             }

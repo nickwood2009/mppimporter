@@ -154,7 +154,7 @@ namespace ADC.MppImport.Services
                 return;
             }
 
-            int updated = 0, skipped = 0, unchanged = 0;
+            int updated = 0, skipped = 0, unchanged = 0, errors = 0;
             foreach (var task in tasks)
             {
                 string tName = task.GetAttributeValue<string>(TASK_NAME) ?? "(no name)";
@@ -169,12 +169,21 @@ namespace ADC.MppImport.Services
                 decimal existingDayCount = task.GetAttributeValue<decimal>(TASK_DAY_COUNT);
                 if (existingDayCount != dayCount.Value)
                 {
-                    var update = new Entity(TASK_ENTITY, task.Id);
-                    update[TASK_DAY_COUNT] = dayCount.Value;
-                    _service.Update(update);
-                    _trace?.Trace("DayCountService:   [{0}] '{1}' — {2} → {3}",
-                        updated + 1, tName, existingDayCount, dayCount.Value);
-                    updated++;
+                    try
+                    {
+                        var update = new Entity(TASK_ENTITY, task.Id);
+                        update[TASK_DAY_COUNT] = dayCount.Value;
+                        _service.Update(update);
+                        _trace?.Trace("DayCountService:   [{0}] '{1}' — {2} → {3}",
+                            updated + 1, tName, existingDayCount, dayCount.Value);
+                        updated++;
+                    }
+                    catch (Exception ex)
+                    {
+                        errors++;
+                        _trace?.Trace("DayCountService:   ERROR updating '{0}' (id={1}): {2}",
+                            tName, task.Id, ex.Message);
+                    }
                 }
                 else
                 {
@@ -182,8 +191,8 @@ namespace ADC.MppImport.Services
                 }
             }
 
-            _trace?.Trace("DayCountService: RecalcAllTasks complete — {0} updated, {1} unchanged, {2} skipped (no finish date).",
-                updated, unchanged, skipped);
+            _trace?.Trace("DayCountService: RecalcAllTasks complete — {0} updated, {1} unchanged, {2} skipped (no finish date), {3} errors.",
+                updated, unchanged, skipped, errors);
         }
 
         /// <summary>
@@ -338,10 +347,11 @@ namespace ADC.MppImport.Services
         // =====================================================================
 
         /// <summary>
-        /// Retrieves all tasks for a project.
+        /// Retrieves all tasks for a project, handling paging so no tasks are missed.
         /// </summary>
         private List<Entity> RetrieveAllTasks(Guid projectId)
         {
+            var allTasks = new List<Entity>();
             var query = new QueryExpression(TASK_ENTITY)
             {
                 ColumnSet = new ColumnSet(TASK_NAME, TASK_FINISH, TASK_DAY_COUNT),
@@ -351,12 +361,34 @@ namespace ADC.MppImport.Services
                     {
                         new ConditionExpression(TASK_PROJECT, ConditionOperator.Equal, projectId)
                     }
+                },
+                PageInfo = new PagingInfo
+                {
+                    PageNumber = 1,
+                    Count = 5000
                 }
             };
 
-            var results = _service.RetrieveMultiple(query);
-            _trace?.Trace("DayCountService.RetrieveAllTasks: project {0} → {1} tasks returned.", projectId, results.Entities.Count);
-            return results.Entities.ToList();
+            while (true)
+            {
+                var results = _service.RetrieveMultiple(query);
+                allTasks.AddRange(results.Entities);
+
+                if (results.MoreRecords)
+                {
+                    query.PageInfo.PageNumber++;
+                    query.PageInfo.PagingCookie = results.PagingCookie;
+                    _trace?.Trace("DayCountService.RetrieveAllTasks: page {0} returned {1} tasks, more records exist — fetching next page...",
+                        query.PageInfo.PageNumber - 1, results.Entities.Count);
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            _trace?.Trace("DayCountService.RetrieveAllTasks: project {0} → {1} total tasks returned.", projectId, allTasks.Count);
+            return allTasks;
         }
 
         /// <summary>

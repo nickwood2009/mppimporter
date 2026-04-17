@@ -108,25 +108,23 @@ namespace ADC.MppImport.Services
             }
 
             decimal? dayCount = CalculateDayCount(task, context);
-            _trace?.Trace("DayCountService: CalculateDayCount for '{0}' returned {1}",
-                taskName, dayCount.HasValue ? dayCount.Value.ToString() : "(null)");
+            decimal dayCountValue = dayCount ?? 0m;
+            _trace?.Trace("DayCountService: CalculateDayCount for '{0}' returned {1} (storing {2})",
+                taskName, dayCount.HasValue ? dayCount.Value.ToString() : "(null)", dayCountValue);
 
-            if (dayCount.HasValue)
+            decimal existingDayCount = task.GetAttributeValue<decimal>(TASK_DAY_COUNT);
+            if (existingDayCount != dayCountValue)
             {
-                decimal existingDayCount = task.GetAttributeValue<decimal>(TASK_DAY_COUNT);
-                if (existingDayCount != dayCount.Value)
-                {
-                    var update = new Entity(TASK_ENTITY, taskId);
-                    update[TASK_DAY_COUNT] = dayCount.Value;
-                    _service.Update(update);
-                    _trace?.Trace("DayCountService: Updated '{0}' day count: {1} → {2}",
-                        taskName, existingDayCount, dayCount.Value);
-                }
-                else
-                {
-                    _trace?.Trace("DayCountService: Task '{0}' day count unchanged at {1}.",
-                        taskName, existingDayCount);
-                }
+                var update = new Entity(TASK_ENTITY, taskId);
+                update[TASK_DAY_COUNT] = dayCountValue;
+                _service.Update(update);
+                _trace?.Trace("DayCountService: Updated '{0}' day count: {1} → {2}",
+                    taskName, existingDayCount, dayCountValue);
+            }
+            else
+            {
+                _trace?.Trace("DayCountService: Task '{0}' day count unchanged at {1}.",
+                    taskName, existingDayCount);
             }
         }
 
@@ -160,22 +158,21 @@ namespace ADC.MppImport.Services
                 string tName = task.GetAttributeValue<string>(TASK_NAME) ?? "(no name)";
                 decimal? dayCount = CalculateDayCount(task, context);
 
-                if (!dayCount.HasValue)
-                {
-                    skipped++;
-                    continue;
-                }
-
+                decimal dayCountValue = dayCount ?? 0m;
                 decimal existingDayCount = task.GetAttributeValue<decimal>(TASK_DAY_COUNT);
-                if (existingDayCount != dayCount.Value)
+
+                if (!dayCount.HasValue)
+                    skipped++;
+
+                if (existingDayCount != dayCountValue)
                 {
                     try
                     {
                         var update = new Entity(TASK_ENTITY, task.Id);
-                        update[TASK_DAY_COUNT] = dayCount.Value;
+                        update[TASK_DAY_COUNT] = dayCountValue;
                         _service.Update(update);
                         _trace?.Trace("DayCountService:   [{0}] '{1}' — {2} → {3}",
-                            updated + 1, tName, existingDayCount, dayCount.Value);
+                            updated + 1, tName, existingDayCount, dayCountValue);
                         updated++;
                     }
                     catch (Exception ex)

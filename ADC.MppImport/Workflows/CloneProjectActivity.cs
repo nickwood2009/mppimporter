@@ -1,5 +1,6 @@
 using System;
 using System.Activities;
+using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Microsoft.Xrm.Sdk.Workflow;
@@ -86,13 +87,56 @@ namespace ADC.MppImport.Workflows
             TracingService.Trace("CloneProject: Source scheduledstart = {0}",
                 sourceStart.HasValue ? sourceStart.Value.ToString("o") : "(null)");
 
-            // Use source project's start-time-of-day so PSS anchors tasks at same hour (e.g. 9 AM)
-            // Fallback to midnight UTC if source has no start (Dataverse will snap to calendar working-hours start)
-            int startHour = sourceStart.HasValue ? sourceStart.Value.Hour : 0;
-            int startMinute = sourceStart.HasValue ? sourceStart.Value.Minute : 0;
-            DateTime startDateNormalized = newStartDate.Date.AddHours(startHour).AddMinutes(startMinute);
-            TracingService.Trace("CloneProject: Target start = {0:o} (hour={1}, min={2} from source)",
-                startDateNormalized, startHour, startMinute);
+            // DST-aware start time: convert source start to LOCAL time to get working-hours start,
+            // then combine with target LOCAL date and convert back to UTC.
+            // This prevents the 1-hour DST shift that causes +1 day on every task finish.
+            int timezoneCode = 255; // default AUS Eastern
+            try
+            {
+                if (initiatingUserId.HasValue)
+                {
+                    var userSettings = OrganizationService.Retrieve("usersettings", initiatingUserId.Value,
+                        new ColumnSet("timezonecode"));
+                    timezoneCode = userSettings.GetAttributeValue<int>("timezonecode");
+                }
+            }
+            catch (Exception tzEx)
+            {
+                TracingService.Trace("CloneProject: Could not read user timezone (using default 255): {0}", tzEx.Message);
+            }
+            TracingService.Trace("CloneProject: User timezone code = {0}", timezoneCode);
+
+            // Get working-hours start from source project's local time (e.g. 9:00 AM)
+            TimeSpan workStart = TimeSpan.FromHours(9); // safe default
+            if (sourceStart.HasValue)
+            {
+                var localStartResp = (LocalTimeFromUtcTimeResponse)OrganizationService.Execute(
+                    new LocalTimeFromUtcTimeRequest
+                    {
+                        UtcTime = sourceStart.Value,
+                        TimeZoneCode = timezoneCode
+                    });
+                workStart = localStartResp.LocalTime.TimeOfDay;
+                TracingService.Trace("CloneProject: Source start {0:o} → local {1} → workStart {2}",
+                    sourceStart.Value, localStartResp.LocalTime.ToString("o"), workStart);
+            }
+
+            // Convert newStartDate to LOCAL date, combine with working-hours start, convert to UTC
+            var localDateResp = (LocalTimeFromUtcTimeResponse)OrganizationService.Execute(
+                new LocalTimeFromUtcTimeRequest
+                {
+                    UtcTime = newStartDate,
+                    TimeZoneCode = timezoneCode
+                });
+            DateTime targetLocal = localDateResp.LocalTime.Date.Add(workStart);
+            var utcResp = (UtcTimeFromLocalTimeResponse)OrganizationService.Execute(
+                new UtcTimeFromLocalTimeRequest
+                {
+                    LocalTime = targetLocal,
+                    TimeZoneCode = timezoneCode
+                });
+            DateTime startDateNormalized = utcResp.UtcTime;
+            TracingService.Trace("CloneProject: Target local {0:o} → UTC start {1:o}", targetLocal, startDateNormalized);
 
             // Read case details for naming
             var caseRecord = OrganizationService.Retrieve("adc_case", caseRef.Id,

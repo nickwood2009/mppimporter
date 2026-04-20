@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.Serialization.Json;
 using System.Text;
+using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
@@ -352,24 +353,69 @@ namespace ADC.MppImport.Services
                     // Read the project's current start time — PSS set this based on the calendar
                     // when the project was created, so it aligns with working-hours start (e.g. 9 AM)
                     var currentProject = _service.Retrieve("msdyn_project", projectId,
-                        new Microsoft.Xrm.Sdk.Query.ColumnSet("msdyn_scheduledstart"));
+                        new ColumnSet("msdyn_scheduledstart"));
                     var currentStart = currentProject.GetAttributeValue<DateTime?>("msdyn_scheduledstart");
                     _trace?.Trace("[DATE-DIAG] Project current scheduledstart: {0}",
                         currentStart.HasValue ? currentStart.Value.ToString("o") : "(null)");
 
-                    // Combine our desired DATE with the calendar-aligned TIME from the existing project
-                    DateTime desiredDate = projectStartDate.Value.Date;
-                    DateTime sendValue;
+                    // Resolve user timezone for DST-aware date conversion.
+                    // We must convert via local time because the UTC offset differs between
+                    // DST periods (e.g. AEDT=UTC+11 vs AEST=UTC+10). Copying today's UTC
+                    // time-of-day onto a date in a different DST period shifts the local time
+                    // by 1 hour, causing +1 day on every task finish.
+                    int timezoneCode = 255; // default AUS Eastern Standard Time
+                    try
+                    {
+                        var jobUser = job.GetAttributeValue<EntityReference>(ImportJobFields.InitiatingUser);
+                        if (jobUser != null)
+                        {
+                            var userSettings = _service.Retrieve("usersettings", jobUser.Id,
+                                new ColumnSet("timezonecode"));
+                            timezoneCode = userSettings.GetAttributeValue<int>("timezonecode");
+                        }
+                    }
+                    catch (Exception tzEx)
+                    {
+                        _trace?.Trace("[DATE-DIAG] Could not read user timezone (using default 255): {0}", tzEx.Message);
+                    }
+                    _trace?.Trace("[DATE-DIAG] User timezone code: {0}", timezoneCode);
+
+                    // Convert stored UTC date to LOCAL date (handles UTC+10/11 date boundary)
+                    var localDateResp = (LocalTimeFromUtcTimeResponse)_service.Execute(
+                        new LocalTimeFromUtcTimeRequest
+                        {
+                            UtcTime = projectStartDate.Value,
+                            TimeZoneCode = timezoneCode
+                        });
+                    DateTime localDate = localDateResp.LocalTime.Date;
+                    _trace?.Trace("[DATE-DIAG] Stored UTC {0:o} → local date {1:yyyy-MM-dd}", projectStartDate.Value, localDate);
+
+                    // Get working-hours start time from the project's current start (e.g. 9:00 AM local)
+                    TimeSpan workStart = TimeSpan.FromHours(9); // safe default
                     if (currentStart.HasValue)
                     {
-                        // Preserve the time-of-day that PSS/calendar assigned (e.g. 23:00 UTC = 9 AM AEST)
-                        sendValue = desiredDate.Add(currentStart.Value.TimeOfDay);
+                        var localStartResp = (LocalTimeFromUtcTimeResponse)_service.Execute(
+                            new LocalTimeFromUtcTimeRequest
+                            {
+                                UtcTime = currentStart.Value,
+                                TimeZoneCode = timezoneCode
+                            });
+                        workStart = localStartResp.LocalTime.TimeOfDay;
+                        _trace?.Trace("[DATE-DIAG] Project start {0:o} → local time {1} → working-hours start {2}",
+                            currentStart.Value, localStartResp.LocalTime.ToString("o"), workStart);
                     }
-                    else
-                    {
-                        // Fallback: midnight UTC — PSS should snap to calendar working-hours start
-                        sendValue = desiredDate;
-                    }
+
+                    // Combine: target LOCAL date + working-hours start, then convert to UTC
+                    // This correctly handles DST for the specific target date
+                    DateTime targetLocal = localDate.Add(workStart);
+                    var utcResp = (UtcTimeFromLocalTimeResponse)_service.Execute(
+                        new UtcTimeFromLocalTimeRequest
+                        {
+                            LocalTime = targetLocal,
+                            TimeZoneCode = timezoneCode
+                        });
+                    DateTime sendValue = utcResp.UtcTime;
+                    _trace?.Trace("[DATE-DIAG] Target local {0:o} → UTC sendValue {1:o}", targetLocal, sendValue);
                     _trace?.Trace("[DATE-DIAG] Sending to PSS msdyn_scheduledstart: {0:o}  Kind={1}", sendValue, sendValue.Kind);
 
                     string startOsId = CreateOperationSet(projectId, "Set project start date");

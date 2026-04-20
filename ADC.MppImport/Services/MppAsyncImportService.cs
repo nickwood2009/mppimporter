@@ -60,10 +60,10 @@ namespace ADC.MppImport.Services
                 }
                 if (earliest.HasValue)
                 {
-                    projectStartDate = earliest.Value.Date.AddHours(12); // noon UTC to avoid off-by-one in UTC+ zones
+                    projectStartDate = earliest.Value.Date; // store date only; time will be aligned to calendar working-hours start at send time
                     _trace?.Trace("[DATE-DIAG] earliest.Value={0:o} Kind={1}", earliest.Value, earliest.Value.Kind);
                     _trace?.Trace("[DATE-DIAG] Storing on job record: {0:o} Kind={1}", projectStartDate.Value, projectStartDate.Value.Kind);
-                    _trace?.Trace("Using earliest MPP task start date: {0:yyyy-MM-dd} (noon UTC)", projectStartDate.Value);
+                    _trace?.Trace("Using earliest MPP task start date: {0:yyyy-MM-dd}", projectStartDate.Value);
                 }
             }
 
@@ -348,7 +348,28 @@ namespace ADC.MppImport.Services
                 {
                     _trace?.Trace("[DATE-DIAG] Raw from job record: {0:o}  Kind={1}  Ticks={2}",
                         projectStartDate.Value, projectStartDate.Value.Kind, projectStartDate.Value.Ticks);
-                    var sendValue = projectStartDate.Value;
+
+                    // Read the project's current start time — PSS set this based on the calendar
+                    // when the project was created, so it aligns with working-hours start (e.g. 9 AM)
+                    var currentProject = _service.Retrieve("msdyn_project", projectId,
+                        new Microsoft.Xrm.Sdk.Query.ColumnSet("msdyn_scheduledstart"));
+                    var currentStart = currentProject.GetAttributeValue<DateTime?>("msdyn_scheduledstart");
+                    _trace?.Trace("[DATE-DIAG] Project current scheduledstart: {0}",
+                        currentStart.HasValue ? currentStart.Value.ToString("o") : "(null)");
+
+                    // Combine our desired DATE with the calendar-aligned TIME from the existing project
+                    DateTime desiredDate = projectStartDate.Value.Date;
+                    DateTime sendValue;
+                    if (currentStart.HasValue)
+                    {
+                        // Preserve the time-of-day that PSS/calendar assigned (e.g. 23:00 UTC = 9 AM AEST)
+                        sendValue = desiredDate.Add(currentStart.Value.TimeOfDay);
+                    }
+                    else
+                    {
+                        // Fallback: midnight UTC — PSS should snap to calendar working-hours start
+                        sendValue = desiredDate;
+                    }
                     _trace?.Trace("[DATE-DIAG] Sending to PSS msdyn_scheduledstart: {0:o}  Kind={1}", sendValue, sendValue.Kind);
 
                     string startOsId = CreateOperationSet(projectId, "Set project start date");

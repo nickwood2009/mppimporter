@@ -87,6 +87,7 @@ namespace ADC.MppImport.Workflows
             TracingService.Trace("CloneProject: Source scheduledstart = {0}",
                 sourceStart.HasValue ? sourceStart.Value.ToString("o") : "(null)");
 
+            // ===== BEGIN CHANGE: DST-aware start time (v1.0.72) =====
             // DST-aware start time: convert source start to LOCAL time to get working-hours start,
             // then combine with target LOCAL date and convert back to UTC.
             // This prevents the 1-hour DST shift that causes +1 day on every task finish.
@@ -113,7 +114,7 @@ namespace ADC.MppImport.Workflows
                 var localStartResp = (LocalTimeFromUtcTimeResponse)OrganizationService.Execute(
                     new LocalTimeFromUtcTimeRequest
                     {
-                        UtcTime = sourceStart.Value,
+                        UtcTime = DateTime.SpecifyKind(sourceStart.Value, DateTimeKind.Utc),
                         TimeZoneCode = timezoneCode
                     });
                 workStart = localStartResp.LocalTime.TimeOfDay;
@@ -125,7 +126,7 @@ namespace ADC.MppImport.Workflows
             var localDateResp = (LocalTimeFromUtcTimeResponse)OrganizationService.Execute(
                 new LocalTimeFromUtcTimeRequest
                 {
-                    UtcTime = newStartDate,
+                    UtcTime = DateTime.SpecifyKind(newStartDate, DateTimeKind.Utc),
                     TimeZoneCode = timezoneCode
                 });
             DateTime targetLocal = localDateResp.LocalTime.Date.Add(workStart);
@@ -137,6 +138,11 @@ namespace ADC.MppImport.Workflows
                 });
             DateTime startDateNormalized = utcResp.UtcTime;
             TracingService.Trace("CloneProject: Target local {0:o} → UTC start {1:o}", targetLocal, startDateNormalized);
+            // ===== END CHANGE: DST-aware start time (v1.0.72) =====
+            // ROLLBACK: Replace the above block with:
+            //   int startHour = sourceStart.HasValue ? sourceStart.Value.Hour : 0;
+            //   int startMinute = sourceStart.HasValue ? sourceStart.Value.Minute : 0;
+            //   DateTime startDateNormalized = newStartDate.Date.AddHours(startHour).AddMinutes(startMinute);
 
             // Read case details for naming
             var caseRecord = OrganizationService.Retrieve("adc_case", caseRef.Id,
@@ -307,6 +313,8 @@ namespace ADC.MppImport.Workflows
 
         /// <summary>
         /// Waits for tasks to appear on the project, then recalculates day counts.
+        /// Waits until the task count stabilises AND tasks have finish dates before
+        /// running the recalc — PSS creates tasks asynchronously after CopyProjectV3.
         /// Returns true if recalc ran successfully.
         /// </summary>
         private bool WaitForTasksAndRecalc(Guid projectId)
@@ -314,11 +322,15 @@ namespace ADC.MppImport.Workflows
             TracingService.Trace("CloneProject: Waiting for tasks to appear on project {0}...", projectId);
 
             int taskCount = 0;
+            int prevCount = -1;
+            int stableRounds = 0;
+            const int STABLE_REQUIRED = 3; // count must be unchanged for 3 consecutive polls
+
             for (int attempt = 0; attempt < TASK_WAIT_MAX_ATTEMPTS; attempt++)
             {
                 var query = new QueryExpression("msdyn_projecttask")
                 {
-                    ColumnSet = new ColumnSet(false),
+                    ColumnSet = new ColumnSet("msdyn_scheduledend"),
                     Criteria =
                     {
                         Conditions =
@@ -330,12 +342,34 @@ namespace ADC.MppImport.Workflows
                 var results = OrganizationService.RetrieveMultiple(query);
                 taskCount = results.Entities.Count;
 
-                TracingService.Trace("CloneProject: Task wait {0}/{1} — {2} tasks found.",
-                    attempt + 1, TASK_WAIT_MAX_ATTEMPTS, taskCount);
+                // Count how many already have finish dates
+                int withFinish = 0;
+                foreach (var t in results.Entities)
+                {
+                    if (t.GetAttributeValue<DateTime?>("msdyn_scheduledend") != null)
+                        withFinish++;
+                }
 
-                if (taskCount > 0)
-                    break;
+                TracingService.Trace("CloneProject: Task wait {0}/{1} — {2} tasks found ({3} with finish dates).",
+                    attempt + 1, TASK_WAIT_MAX_ATTEMPTS, taskCount, withFinish);
 
+                // Wait until count > 0, count is stable, and all tasks have finish dates
+                if (taskCount > 0 && taskCount == prevCount && withFinish == taskCount)
+                {
+                    stableRounds++;
+                    if (stableRounds >= STABLE_REQUIRED)
+                    {
+                        TracingService.Trace("CloneProject: Task count stable at {0} for {1} rounds — proceeding.",
+                            taskCount, stableRounds);
+                        break;
+                    }
+                }
+                else
+                {
+                    stableRounds = 0;
+                }
+
+                prevCount = taskCount;
                 System.Threading.Thread.Sleep(TASK_WAIT_INTERVAL_SECONDS * 1000);
             }
 

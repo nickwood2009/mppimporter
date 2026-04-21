@@ -107,12 +107,12 @@ namespace ADC.MppImport.Services
                 return;
             }
 
-            decimal? dayCount = CalculateDayCount(task, context);
-            decimal dayCountValue = dayCount ?? 0m;
+            double? dayCount = CalculateDayCount(task, context);
+            double dayCountValue = dayCount ?? 0.0;
             _trace?.Trace("DayCountService: CalculateDayCount for '{0}' returned {1} (storing {2})",
                 taskName, dayCount.HasValue ? dayCount.Value.ToString() : "(null)", dayCountValue);
 
-            decimal existingDayCount = task.GetAttributeValue<decimal>(TASK_DAY_COUNT);
+            double existingDayCount = task.GetAttributeValue<double>(TASK_DAY_COUNT);
             if (existingDayCount != dayCountValue)
             {
                 var update = new Entity(TASK_ENTITY, taskId);
@@ -156,10 +156,10 @@ namespace ADC.MppImport.Services
             foreach (var task in tasks)
             {
                 string tName = task.GetAttributeValue<string>(TASK_NAME) ?? "(no name)";
-                decimal? dayCount = CalculateDayCount(task, context);
+                double? dayCount = CalculateDayCount(task, context);
 
-                decimal dayCountValue = dayCount ?? 0m;
-                decimal existingDayCount = task.GetAttributeValue<decimal>(TASK_DAY_COUNT);
+                double dayCountValue = dayCount ?? 0.0;
+                double existingDayCount = task.GetAttributeValue<double>(TASK_DAY_COUNT);
 
                 if (!dayCount.HasValue)
                     skipped++;
@@ -316,7 +316,7 @@ namespace ADC.MppImport.Services
         /// Calculates day count for a single task: datediff(task finish, reference date).
         /// Returns null if task has no finish date or no reference date is available.
         /// </summary>
-        private decimal? CalculateDayCount(Entity task, CalcContext ctx)
+        private double? CalculateDayCount(Entity task, CalcContext ctx)
         {
             string taskName = task.GetAttributeValue<string>(TASK_NAME) ?? "";
             DateTime? taskFinish = task.GetAttributeValue<DateTime?>(TASK_FINISH);
@@ -333,7 +333,7 @@ namespace ADC.MppImport.Services
                 return null;
             }
 
-            decimal result = (decimal)(taskFinish.Value.Date - ctx.ReferenceDate.Value).TotalDays;
+            double result = (taskFinish.Value.Date - ctx.ReferenceDate.Value).TotalDays;
             _trace?.Trace("DayCountService.Calc: '{0}' = {1:yyyy-MM-dd} - {2:yyyy-MM-dd} ({3}) = {4}",
                 taskName, taskFinish.Value.Date, ctx.ReferenceDate.Value, ctx.ReferenceDateSource, result);
             return result;

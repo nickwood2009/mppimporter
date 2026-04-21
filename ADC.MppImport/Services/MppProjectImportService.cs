@@ -903,7 +903,7 @@ namespace ADC.MppImport.Services
 
                 // Custom fields from MPP
                 if (src.DayCount.HasValue)
-                    taskUpdate["adc_daycount"] = src.DayCount.Value;
+                    taskUpdate["adc_daycount1"] = (double)src.DayCount.Value;
                 TrySetDecimalValue(taskUpdate, "adc_baseline1", src.Baseline1);
                 TrySetDecimalValue(taskUpdate, "adc_baseline2", src.Baseline2);
                 TrySetDecimalValue(taskUpdate, "adc_baseline3", src.Baseline3);

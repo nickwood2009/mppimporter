@@ -29,6 +29,10 @@ namespace ADC.MppImport.Workflows
         [ReferenceTarget("systemuser")]
         public OutArgument<EntityReference> ResolvedUser { get; set; }
 
+        [Output("Case")]
+        [ReferenceTarget("adc_case")]
+        public OutArgument<EntityReference> CaseOut { get; set; }
+
         protected override void ExecuteActivity(CodeActivityContext executionContext)
         {
             var caseRef = Case.Get(executionContext);
@@ -61,6 +65,8 @@ namespace ADC.MppImport.Workflows
             var tasks = service.GetTaskAllocationsForProject(projectId.Value);
             var resolvedUser = RoleAllocationService.ResolveAllocation(roleType, tasks, refDate);
             ResolvedUser.Set(executionContext, resolvedUser);
+
+            CaseOut.Set(executionContext, caseRef);
 
             TracingService.Trace("ResolveRoleAllocation: Result = {0}",
                 resolvedUser != null ? resolvedUser.Id.ToString() : "(null)");

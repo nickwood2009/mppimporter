@@ -7,7 +7,7 @@ using ADC.MppImport.Services;
 namespace ADC.MppImport.Workflows
 {
     /// <summary>
-    /// Resolves a user from project task assignments by role type and updates a case lookup field.
+    /// Resolves a user from project task assignments by role type.
     /// Finds project for case, queries tasks+assignments, picks active allocation with earliest start.
     /// </summary>
     public class ResolveRoleAllocationActivity : BaseCodeActivity
@@ -17,35 +17,34 @@ namespace ADC.MppImport.Workflows
         [RequiredArgument]
         public InArgument<EntityReference> Case { get; set; }
 
-        [Input("Role Type Value")]
+        [Input("Role Type")]
+        [AttributeTarget("msdyn_projecttask", "adc_roletype")]
         [RequiredArgument]
-        public InArgument<int> RoleTypeValue { get; set; }
+        public InArgument<OptionSetValue> RoleType { get; set; }
 
-        [Input("Case Field Name")]
-        [RequiredArgument]
-        public InArgument<string> CaseFieldName { get; set; }
+        [Input("Reference Date")]
+        public InArgument<DateTime> ReferenceDate { get; set; }
 
         [Output("Resolved User")]
         [ReferenceTarget("systemuser")]
         public OutArgument<EntityReference> ResolvedUser { get; set; }
 
-        [Output("Was Updated")]
-        public OutArgument<bool> WasUpdated { get; set; }
-
         protected override void ExecuteActivity(CodeActivityContext executionContext)
         {
             var caseRef = Case.Get(executionContext);
-            int roleType = RoleTypeValue.Get(executionContext);
-            string caseFieldName = CaseFieldName.Get(executionContext);
+            var roleOsv = RoleType.Get(executionContext);
+            int roleType = roleOsv != null ? roleOsv.Value : 0;
+            DateTime refDate = ReferenceDate.Get(executionContext);
+            if (refDate == DateTime.MinValue)
+                refDate = DateTime.UtcNow;
 
-            TracingService.Trace("ResolveRoleAllocation: Case={0}, RoleType={1}, CaseField={2}",
-                caseRef.Id, roleType, caseFieldName ?? "(null)");
+            TracingService.Trace("ResolveRoleAllocation: Case={0}, RoleType={1}, Date={2:yyyy-MM-dd}",
+                caseRef.Id, roleType, refDate);
 
-            if (string.IsNullOrEmpty(caseFieldName))
+            if (roleType == 0)
             {
-                TracingService.Trace("ResolveRoleAllocation: CaseFieldName is required.");
+                TracingService.Trace("ResolveRoleAllocation: RoleType is required.");
                 ResolvedUser.Set(executionContext, null);
-                WasUpdated.Set(executionContext, false);
                 return;
             }
 
@@ -54,33 +53,17 @@ namespace ADC.MppImport.Workflows
             Guid? projectId = service.FindProjectForCase(caseRef.Id);
             if (!projectId.HasValue)
             {
-                TracingService.Trace("ResolveRoleAllocation: No project found for case. Skipping.");
+                TracingService.Trace("ResolveRoleAllocation: No project found for case.");
                 ResolvedUser.Set(executionContext, null);
-                WasUpdated.Set(executionContext, false);
                 return;
             }
-            TracingService.Trace("ResolveRoleAllocation: Project = {0}", projectId.Value);
 
             var tasks = service.GetTaskAllocationsForProject(projectId.Value);
-            var resolvedUser = RoleAllocationService.ResolveAllocation(roleType, tasks, DateTime.UtcNow);
+            var resolvedUser = RoleAllocationService.ResolveAllocation(roleType, tasks, refDate);
             ResolvedUser.Set(executionContext, resolvedUser);
 
-            if (resolvedUser != null)
-            {
-                TracingService.Trace("ResolveRoleAllocation: Resolved user = {0} ({1})",
-                    resolvedUser.Id, resolvedUser.LogicalName);
-
-                var caseUpdate = new Entity(RoleAllocationService.CASE_ENTITY, caseRef.Id);
-                caseUpdate[caseFieldName] = resolvedUser;
-                OrganizationService.Update(caseUpdate);
-                WasUpdated.Set(executionContext, true);
-                TracingService.Trace("ResolveRoleAllocation: Updated case.{0} = {1}", caseFieldName, resolvedUser.Id);
-            }
-            else
-            {
-                TracingService.Trace("ResolveRoleAllocation: No active allocation found. Retaining existing value.");
-                WasUpdated.Set(executionContext, false);
-            }
+            TracingService.Trace("ResolveRoleAllocation: Result = {0}",
+                resolvedUser != null ? resolvedUser.Id.ToString() : "(null)");
         }
     }
 }

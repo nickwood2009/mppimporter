@@ -614,7 +614,8 @@ namespace ADC.MppImport.Test
 
         /// <summary>
         /// Tries the cached connection first. If it's still valid, returns it.
-        /// Otherwise connects fresh (with LoginPrompt=Auto so the token cache is used if possible).
+        /// Otherwise tries silent/cached token, and falls back to full login prompt
+        /// so the user can pick the correct account.
         /// </summary>
         static IOrganizationService ConnectOrReuse(string crmUrl, string appId, string redirectUri)
         {
@@ -627,7 +628,30 @@ namespace ADC.MppImport.Test
                 return (IOrganizationService)_cachedClient;
             }
 
-            // Connect fresh — Auto will use cached token if available, prompt only if needed
+            // Try 1: Auto — uses cached/silent token if available (no popup)
+            Console.WriteLine("  Trying cached token...");
+            try
+            {
+                string autoConn = string.Format(
+                    "AuthType=OAuth;Url={0};AppId={1};RedirectUri={2};LoginPrompt=Auto",
+                    crmUrl, appId, redirectUri);
+                var autoClient = new CrmServiceClient(autoConn);
+                if (autoClient.IsReady)
+                {
+                    Console.WriteLine("  Org: {0}", autoClient.ConnectedOrgFriendlyName);
+                    Console.WriteLine("  User: {0}", autoClient.OAuthUserId);
+                    _cachedClient = autoClient;
+                    _cachedCrmUrl = crmUrl;
+                    return (IOrganizationService)autoClient;
+                }
+                Console.WriteLine("  Cached token not valid. Prompting for sign-in...");
+            }
+            catch
+            {
+                Console.WriteLine("  Cached token failed. Prompting for sign-in...");
+            }
+
+            // Try 2: Always — full login prompt so user can pick the right account
             var client = ConnectToCrm(crmUrl, appId, redirectUri);
             _cachedClient = (CrmServiceClient)client;
             _cachedCrmUrl = crmUrl;
@@ -637,7 +661,7 @@ namespace ADC.MppImport.Test
         static IOrganizationService ConnectToCrm(string crmUrl, string appId, string redirectUri)
         {
             string connString = string.Format(
-                "AuthType=OAuth;Url={0};AppId={1};RedirectUri={2};LoginPrompt=Auto",
+                "AuthType=OAuth;Url={0};AppId={1};RedirectUri={2};LoginPrompt=Always",
                 crmUrl, appId, redirectUri);
 
             var client = new CrmServiceClient(connString);

@@ -16,6 +16,10 @@ namespace ADC.MppImport.Test
         private const string DefaultAppId = "51f81489-12ee-4a9e-aaae-a2591f45987d";
         private const string DefaultRedirectUri = "app://58145B91-0C36-4500-8554-080854F2AC97";
 
+        // Cached CRM connection — reused across menu operations within a session
+        private static CrmServiceClient _cachedClient;
+        private static string _cachedCrmUrl;
+
         static int Main(string[] args)
         {
             // CLI mode: parse <path>
@@ -608,10 +612,32 @@ namespace ADC.MppImport.Test
             return (IOrganizationService)client;
         }
 
+        /// <summary>
+        /// Tries the cached connection first. If it's still valid, returns it.
+        /// Otherwise connects fresh (with LoginPrompt=Auto so the token cache is used if possible).
+        /// </summary>
+        static IOrganizationService ConnectOrReuse(string crmUrl, string appId, string redirectUri)
+        {
+            // Reuse cached client if same URL and still connected
+            if (_cachedClient != null
+                && _cachedClient.IsReady
+                && string.Equals(_cachedCrmUrl, crmUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine("  Reusing cached connection ({0}).", _cachedClient.ConnectedOrgFriendlyName);
+                return (IOrganizationService)_cachedClient;
+            }
+
+            // Connect fresh — Auto will use cached token if available, prompt only if needed
+            var client = ConnectToCrm(crmUrl, appId, redirectUri);
+            _cachedClient = (CrmServiceClient)client;
+            _cachedCrmUrl = crmUrl;
+            return client;
+        }
+
         static IOrganizationService ConnectToCrm(string crmUrl, string appId, string redirectUri)
         {
             string connString = string.Format(
-                "AuthType=OAuth;Url={0};AppId={1};RedirectUri={2};LoginPrompt=Always;RequireNewInstance=True",
+                "AuthType=OAuth;Url={0};AppId={1};RedirectUri={2};LoginPrompt=Auto",
                 crmUrl, appId, redirectUri);
 
             var client = new CrmServiceClient(connString);
@@ -876,8 +902,8 @@ namespace ADC.MppImport.Test
                 {
                     string appId = GetEnv(env, "APP_ID") ?? DefaultAppId;
                     string redirectUri = (appId == DefaultAppId) ? DefaultRedirectUri : "http://localhost";
-                    Console.WriteLine("Connecting to Dynamics 365 (browser login)...");
-                    service = ConnectToCrm(crmUrl, appId, redirectUri);
+                    Console.WriteLine("Connecting to Dynamics 365...");
+                    service = ConnectOrReuse(crmUrl, appId, redirectUri);
                 }
                 Console.WriteLine("  Connected successfully.");
             }

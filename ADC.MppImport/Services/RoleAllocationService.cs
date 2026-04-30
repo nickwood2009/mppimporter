@@ -6,38 +6,31 @@ using Microsoft.Xrm.Sdk.Query;
 namespace ADC.MppImport.Services
 {
     /// <summary>
-    /// Resolves Case Director and Case Manager allocations from project task assignments.
-    /// The core ResolveAllocation method is static and pure (no Dataverse calls) for unit testing.
-    /// Dataverse query helpers are instance methods that require IOrganizationService.
+    /// Resolves user allocations from project task assignments based on role type.
+    /// ResolveAllocation is static/pure for unit testing; Dataverse helpers are instance methods.
     /// </summary>
     public class RoleAllocationService
     {
-        #region Schema constants — update these to match your Dataverse schema
+        #region Schema constants
 
-        // adc_case entity
         public const string CASE_ENTITY = "adc_case";
 
-        // msdyn_projecttask fields
         public const string TASK_ENTITY = "msdyn_projecttask";
         public const string TASK_PROJECT_FIELD = "msdyn_project";
         public const string TASK_NAME_FIELD = "msdyn_subject";
         public const string TASK_START_FIELD = "msdyn_scheduledstart";
         public const string TASK_END_FIELD = "msdyn_scheduledend";
-        public const string TASK_ROLE_FIELD = "adc_assigneerole";       // TODO: verify schema name
+        public const string TASK_ROLE_FIELD = "adc_roletype";
 
-        // msdyn_resourceassignment fields (Assigned To is on this related entity, not on task)
         public const string ASSIGNMENT_ENTITY = "msdyn_resourceassignment";
         public const string ASSIGNMENT_TASK_FIELD = "msdyn_taskid";
         public const string ASSIGNMENT_RESOURCE_FIELD = "msdyn_bookableresourceid";
 
-        // bookableresource → systemuser resolution
         public const string RESOURCE_ENTITY = "bookableresource";
         public const string RESOURCE_USER_FIELD = "userid";
 
-        // Project entity
         public const string PROJECT_ENTITY = "msdyn_project";
         public const string PROJECT_CASE_FIELD = "adc_parentadccase";
-
 
         #endregion
 
@@ -50,25 +43,11 @@ namespace ADC.MppImport.Services
             _trace = trace;
         }
 
-        #region Pure logic — unit-testable, no Dataverse dependency
+        #region Pure logic
 
-        /// <summary>
-        /// Resolves which user should be allocated for a given role type based on project task data.
-        /// Returns null if no active allocation found (caller should retain existing case value).
-        ///
-        /// Business rules (identical for Case Director and Case Manager):
-        ///   1. Filter tasks to those matching the target role type that have a valid assignee.
-        ///   2. Among those, find "active" tasks where StartDate &lt;= today AND EndDate &gt;= today.
-        ///   3. If one or more active tasks exist, return the assignee of the one with the earliest StartDate.
-        ///   4. If no active tasks (all ended or none found), return null — caller retains existing value.
-        ///
-        /// If multiple assignees exist for the same task, the caller is expected to have already
-        /// picked the first one when building the TaskAllocationInfo list.
-        /// </summary>
-        /// <param name="targetRoleType">The option set value for the role (e.g. ROLE_CASE_DIRECTOR).</param>
-        /// <param name="tasks">All project tasks with their role types, dates, and resolved assignees.</param>
-        /// <param name="today">Reference date for active/inactive determination.</param>
-        /// <returns>EntityReference to the resolved systemuser, or null if no active allocation.</returns>
+        // targetRoleType: option set int value for the role
+        // tasks: all project tasks with role types, dates, and resolved assignees
+        // today: reference date for active/inactive determination
         public static EntityReference ResolveAllocation(
             int targetRoleType,
             IList<TaskAllocationInfo> tasks,
@@ -77,7 +56,6 @@ namespace ADC.MppImport.Services
             if (tasks == null || tasks.Count == 0)
                 return null;
 
-            // Step 1: Filter to tasks matching the target role type with a valid assignee
             var roleTasks = new List<TaskAllocationInfo>();
             for (int i = 0; i < tasks.Count; i++)
             {
@@ -93,7 +71,6 @@ namespace ADC.MppImport.Services
             if (roleTasks.Count == 0)
                 return null;
 
-            // Step 2: Filter to "active" allocations: StartDate <= today AND EndDate >= today
             var activeTasks = new List<TaskAllocationInfo>();
             for (int i = 0; i < roleTasks.Count; i++)
             {
@@ -105,14 +82,12 @@ namespace ADC.MppImport.Services
                 }
             }
 
-            // Step 3: If active allocations exist, pick the one with the earliest start date
             if (activeTasks.Count > 0)
             {
                 activeTasks.Sort((a, b) => a.StartDate.Value.CompareTo(b.StartDate.Value));
                 return activeTasks[0].AssignedTo;
             }
 
-            // Step 4: No active allocation — return null so caller retains existing case value
             return null;
         }
 
@@ -121,10 +96,7 @@ namespace ADC.MppImport.Services
 
         #region Dataverse queries
 
-        /// <summary>
-        /// Finds the project linked to a case via adc_parentadccase on msdyn_project.
-        /// Returns null if no project is linked.
-        /// </summary>
+        // caseId: the adc_case record to find the linked project for
         public Guid? FindProjectForCase(Guid caseId)
         {
             var query = new QueryExpression(PROJECT_ENTITY)
@@ -151,11 +123,7 @@ namespace ADC.MppImport.Services
             return null;
         }
 
-        /// <summary>
-        /// Queries all project tasks for a given project, joins resource assignments and
-        /// bookable resources to resolve the assigned systemuser for each task.
-        /// Returns one TaskAllocationInfo per task (first resource assignment wins if multiple).
-        /// </summary>
+        // projectId: queries tasks + resource assignments + bookableresource for this project
         public List<TaskAllocationInfo> GetTaskAllocationsForProject(Guid projectId)
         {
             _trace?.Trace("RoleAllocationService: Querying task allocations for project {0}", projectId);
@@ -172,7 +140,6 @@ namespace ADC.MppImport.Services
                 }
             };
 
-            // LEFT JOIN msdyn_resourceassignment on task PK → assignment FK
             var raLink = query.AddLink(
                 ASSIGNMENT_ENTITY,
                 "msdyn_projecttaskid",
@@ -181,7 +148,6 @@ namespace ADC.MppImport.Services
             raLink.EntityAlias = "ra";
             raLink.Columns.AddColumn(ASSIGNMENT_RESOURCE_FIELD);
 
-            // LEFT JOIN bookableresource to resolve the user behind the resource
             var brLink = raLink.AddLink(
                 RESOURCE_ENTITY,
                 ASSIGNMENT_RESOURCE_FIELD,
@@ -193,20 +159,17 @@ namespace ADC.MppImport.Services
             var results = _service.RetrieveMultiple(query);
             _trace?.Trace("RoleAllocationService: Retrieved {0} rows (tasks x assignments)", results.Entities.Count);
 
-            // Build one DTO per task — first resource assignment per task wins
             var seen = new Dictionary<Guid, TaskAllocationInfo>();
             foreach (var entity in results.Entities)
             {
                 Guid taskId = entity.Id;
 
-                // Skip if we already recorded this task (first assignment wins)
                 if (seen.ContainsKey(taskId))
                     continue;
 
                 var roleOsv = entity.GetAttributeValue<OptionSetValue>(TASK_ROLE_FIELD);
                 int? roleType = roleOsv != null ? (int?)roleOsv.Value : null;
 
-                // Resolve the systemuser from the joined bookableresource.userid alias
                 EntityReference assignedTo = null;
                 var userAlias = entity.GetAttributeValue<AliasedValue>("br." + RESOURCE_USER_FIELD);
                 if (userAlias != null && userAlias.Value is EntityReference)
@@ -245,29 +208,13 @@ namespace ADC.MppImport.Services
         #endregion
     }
 
-    /// <summary>
-    /// DTO representing a project task's role allocation data.
-    /// Used as input to the pure RoleAllocationService.ResolveAllocation function.
-    /// Designed for easy construction in unit tests.
-    /// </summary>
     public class TaskAllocationInfo
     {
         public Guid TaskId { get; set; }
         public string TaskName { get; set; }
-
-        /// <summary>adc_assigneerole option set value (e.g. ROLE_CASE_DIRECTOR, ROLE_CASE_MANAGER).</summary>
-        public int? RoleType { get; set; }
-
-        /// <summary>msdyn_scheduledstart on the project task.</summary>
-        public DateTime? StartDate { get; set; }
-
-        /// <summary>msdyn_scheduledend on the project task.</summary>
-        public DateTime? EndDate { get; set; }
-
-        /// <summary>
-        /// The resolved systemuser from the task's first resource assignment
-        /// (bookableresource → userid). Null if no assignment or resource has no linked user.
-        /// </summary>
-        public EntityReference AssignedTo { get; set; }
+        public int? RoleType { get; set; }        // adc_roletype option set value
+        public DateTime? StartDate { get; set; }  // msdyn_scheduledstart
+        public DateTime? EndDate { get; set; }    // msdyn_scheduledend
+        public EntityReference AssignedTo { get; set; } // resolved systemuser from bookableresource
     }
 }

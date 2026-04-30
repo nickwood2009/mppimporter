@@ -7,25 +7,8 @@ using ADC.MppImport.Services;
 namespace ADC.MppImport.Workflows
 {
     /// <summary>
-    /// Resolves a Case Director or Case Manager from project task resource assignments
-    /// and updates the corresponding lookup field on the adc_case record.
-    ///
-    /// Inputs:
-    ///   - Case: the adc_case record to evaluate and update.
-    ///   - RoleTypeValue: the adc_assigneerole option set integer value to resolve (global optionset).
-    ///   - CaseFieldName: the schema name of the lookup field on adc_case to update (e.g. "adc_casedirector").
-    ///
-    /// Outputs:
-    ///   - ResolvedUser: the systemuser EntityReference resolved (null if no active allocation).
-    ///   - WasUpdated: true if the case field was updated, false if retained/skipped.
-    ///
-    /// Business rules:
-    ///   1. Find the project linked to the case.
-    ///   2. Query all tasks + resource assignments for that project.
-    ///   3. Filter to tasks with the specified role type, active dates (Start &lt;= today, End &gt;= today),
-    ///      and a valid assigned user.
-    ///   4. Pick the task with the earliest Start Date; return its assigned user.
-    ///   5. If no active allocation exists, retain the existing case value (no update).
+    /// Resolves a user from project task assignments by role type and updates a case lookup field.
+    /// Finds project for case, queries tasks+assignments, picks active allocation with earliest start.
     /// </summary>
     public class ResolveRoleAllocationActivity : BaseCodeActivity
     {
@@ -68,7 +51,6 @@ namespace ADC.MppImport.Workflows
 
             var service = new RoleAllocationService(OrganizationService, TracingService);
 
-            // 1. Find the project linked to this case
             Guid? projectId = service.FindProjectForCase(caseRef.Id);
             if (!projectId.HasValue)
             {
@@ -79,10 +61,7 @@ namespace ADC.MppImport.Workflows
             }
             TracingService.Trace("ResolveRoleAllocation: Project = {0}", projectId.Value);
 
-            // 2. Query task allocations (tasks + resource assignments + users)
             var tasks = service.GetTaskAllocationsForProject(projectId.Value);
-
-            // 3. Resolve allocation using pure logic (static, unit-testable)
             var resolvedUser = RoleAllocationService.ResolveAllocation(roleType, tasks, DateTime.UtcNow);
             ResolvedUser.Set(executionContext, resolvedUser);
 
@@ -91,7 +70,6 @@ namespace ADC.MppImport.Workflows
                 TracingService.Trace("ResolveRoleAllocation: Resolved user = {0} ({1})",
                     resolvedUser.Id, resolvedUser.LogicalName);
 
-                // 4. Update the specified case field
                 var caseUpdate = new Entity(RoleAllocationService.CASE_ENTITY, caseRef.Id);
                 caseUpdate[caseFieldName] = resolvedUser;
                 OrganizationService.Update(caseUpdate);

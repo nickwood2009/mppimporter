@@ -113,6 +113,7 @@ namespace ADC.MppImport.Test
                 Console.WriteLine("  7. Regression Tests (all MPP files in exampleFiles)");
                 Console.WriteLine("  8. Async Import Test (plugin chain)");
                 Console.WriteLine("  9. Side-by-Side Comparison (all MPP files)");
+                Console.WriteLine(" 10. Role Allocation Test (resolve Case Director/Manager)");
                 Console.WriteLine("  0. Exit");
                 Console.WriteLine("========================================");
                 Console.Write("Select option: ");
@@ -147,10 +148,13 @@ namespace ADC.MppImport.Test
                     case "9":
                         RunSideBySideTests(null);
                         break;
+                    case "10":
+                        RunRoleAllocationTest();
+                        break;
                     case "0":
                         return 0;
                     default:
-                        Console.WriteLine("Invalid option. Please enter 0-9.");
+                        Console.WriteLine("Invalid option.");
                         break;
                 }
             }
@@ -3585,6 +3589,139 @@ namespace ADC.MppImport.Test
             Console.WriteLine("================================================================");
 
             return totalPass == totalFiles ? 0 : 1;
+        }
+
+        #endregion
+
+        #region Option 10: Role Allocation Test
+
+        static void RunRoleAllocationTest()
+        {
+            Console.WriteLine();
+            Console.WriteLine("--- Role Allocation Test ---");
+            Console.WriteLine();
+
+            // 1. Prompt for case ID
+            Guid caseId = PromptGuid("adc_case ID (GUID): ");
+            if (caseId == Guid.Empty) return;
+
+            // 2. Prompt for role type optionset value
+            Console.Write("Role Type optionset value (integer): ");
+            string roleInput = Console.ReadLine()?.Trim();
+            int roleType;
+            if (!int.TryParse(roleInput, out roleType))
+            {
+                Console.WriteLine("ERROR: '{0}' is not a valid integer.", roleInput);
+                return;
+            }
+
+            // 3. Optional reference date (default = today UTC)
+            Console.Write("Reference date (yyyy-MM-dd, Enter for today): ");
+            string dateInput = Console.ReadLine()?.Trim();
+            DateTime referenceDate = DateTime.UtcNow;
+            if (!string.IsNullOrEmpty(dateInput))
+            {
+                DateTime parsed;
+                if (!DateTime.TryParse(dateInput, out parsed))
+                {
+                    Console.WriteLine("ERROR: '{0}' is not a valid date.", dateInput);
+                    return;
+                }
+                referenceDate = parsed;
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("  Case ID:        {0}", caseId);
+            Console.WriteLine("  Role Type:      {0}", roleType);
+            Console.WriteLine("  Reference Date: {0:yyyy-MM-dd}", referenceDate);
+            Console.WriteLine();
+
+            // 4. Connect to CRM via .env
+            var envData = LoadEnvAndConnect(requireCaseTemplate: false, requireProjectId: false);
+            if (envData == null) return;
+            var service = envData.Value.service;
+            var trace = new ConsoleTracingService();
+
+            // 5. Run the allocation service
+            var allocationService = new RoleAllocationService(service, trace);
+
+            Console.WriteLine();
+            Console.WriteLine("Finding project for case...");
+            Guid? projectId = allocationService.FindProjectForCase(caseId);
+            if (!projectId.HasValue)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("  No project linked to case {0}.", caseId);
+                Console.ResetColor();
+                return;
+            }
+            Console.WriteLine("  Project: {0}", projectId.Value);
+
+            Console.WriteLine();
+            Console.WriteLine("Querying task allocations...");
+            var tasks = allocationService.GetTaskAllocationsForProject(projectId.Value);
+
+            // Show all tasks with the matching role type for diagnostics
+            Console.WriteLine();
+            Console.WriteLine("--- Tasks with Role Type = {0} ---", roleType);
+            int matchCount = 0;
+            foreach (var t in tasks)
+            {
+                if (t.RoleType.HasValue && t.RoleType.Value == roleType)
+                {
+                    matchCount++;
+                    string activeStr = "";
+                    if (t.StartDate.HasValue && t.EndDate.HasValue)
+                    {
+                        bool isActive = t.StartDate.Value.Date <= referenceDate.Date
+                                     && t.EndDate.Value.Date >= referenceDate.Date;
+                        activeStr = isActive ? " [ACTIVE]" : " [INACTIVE]";
+                    }
+                    Console.WriteLine("  {0,-40} Start={1:yyyy-MM-dd}  End={2:yyyy-MM-dd}  Assignee={3}{4}",
+                        Trunc(t.TaskName, 40),
+                        t.StartDate.HasValue ? t.StartDate.Value : (DateTime?)null,
+                        t.EndDate.HasValue ? t.EndDate.Value : (DateTime?)null,
+                        t.AssignedTo != null ? t.AssignedTo.Id.ToString() : "(none)",
+                        activeStr);
+                }
+            }
+            Console.WriteLine("  Total matching tasks: {0}", matchCount);
+
+            // 6. Resolve allocation
+            Console.WriteLine();
+            Console.WriteLine("Resolving allocation...");
+            var resolvedUser = RoleAllocationService.ResolveAllocation(roleType, tasks, referenceDate);
+
+            if (resolvedUser != null)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine();
+                Console.WriteLine("  Resolved User ID: {0}", resolvedUser.Id);
+
+                // Query systemuser to get the full name
+                try
+                {
+                    var user = service.Retrieve("systemuser", resolvedUser.Id,
+                        new Microsoft.Xrm.Sdk.Query.ColumnSet("fullname"));
+                    string fullName = user.GetAttributeValue<string>("fullname") ?? "(no name)";
+                    Console.WriteLine("  User Name:       {0}", fullName);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("  (Could not retrieve user name: {0})", ex.Message);
+                }
+                Console.ResetColor();
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine();
+                Console.WriteLine("  No active allocation found. Existing case value would be retained.");
+                Console.ResetColor();
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("=== Role Allocation Test Complete ===");
         }
 
         #endregion

@@ -102,6 +102,8 @@
     <Compile Include="Services\DayCountService.cs" />
     <Compile Include="Plugins\DayCountPlugin.cs" />
     <Compile Include="Workflows\RecalcDayCountsActivity.cs" />
+    <Compile Include="Services\RoleAllocationService.cs" />
+    <Compile Include="Workflows\ResolveRoleAllocationActivity.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

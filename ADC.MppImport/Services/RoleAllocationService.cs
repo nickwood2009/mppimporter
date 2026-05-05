@@ -182,7 +182,17 @@ namespace ADC.MppImport.Services
                 int? roleType = roleOsv != null ? (int?)roleOsv.Value : null;
 
                 EntityReference assignedTo = null;
+                var teamAlias = entity.GetAttributeValue<AliasedValue>("ra." + ASSIGNMENT_TEAM_FIELD);
+                var brAlias = entity.GetAttributeValue<AliasedValue>("tm." + TEAM_RESOURCE_FIELD);
                 var userAlias = entity.GetAttributeValue<AliasedValue>("br." + RESOURCE_USER_FIELD);
+
+                _trace?.Trace("  Task {0} ({1}): team={2}, br={3}, user={4}",
+                    taskId,
+                    entity.GetAttributeValue<string>(TASK_NAME_FIELD) ?? "",
+                    teamAlias != null ? teamAlias.Value?.ToString() ?? "null-val" : "null",
+                    brAlias != null ? brAlias.Value?.ToString() ?? "null-val" : "null",
+                    userAlias != null ? userAlias.Value?.ToString() ?? "null-val" : "null");
+
                 if (userAlias != null && userAlias.Value is EntityReference)
                 {
                     assignedTo = (EntityReference)userAlias.Value;

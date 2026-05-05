@@ -24,7 +24,10 @@ namespace ADC.MppImport.Services
 
         public const string ASSIGNMENT_ENTITY = "msdyn_resourceassignment";
         public const string ASSIGNMENT_TASK_FIELD = "msdyn_taskid";
-        public const string ASSIGNMENT_RESOURCE_FIELD = "msdyn_bookableresourceid";
+        public const string ASSIGNMENT_TEAM_FIELD = "msdyn_projectteamid";
+
+        public const string TEAM_ENTITY = "msdyn_projectteam";
+        public const string TEAM_RESOURCE_FIELD = "msdyn_bookableresourceid";
 
         public const string RESOURCE_ENTITY = "bookableresource";
         public const string RESOURCE_USER_FIELD = "userid";
@@ -146,11 +149,19 @@ namespace ADC.MppImport.Services
                 ASSIGNMENT_TASK_FIELD,
                 JoinOperator.LeftOuter);
             raLink.EntityAlias = "ra";
-            raLink.Columns.AddColumn(ASSIGNMENT_RESOURCE_FIELD);
+            raLink.Columns.AddColumn(ASSIGNMENT_TEAM_FIELD);
 
-            var brLink = raLink.AddLink(
+            var tmLink = raLink.AddLink(
+                TEAM_ENTITY,
+                ASSIGNMENT_TEAM_FIELD,
+                "msdyn_projectteamid",
+                JoinOperator.LeftOuter);
+            tmLink.EntityAlias = "tm";
+            tmLink.Columns.AddColumn(TEAM_RESOURCE_FIELD);
+
+            var brLink = tmLink.AddLink(
                 RESOURCE_ENTITY,
-                ASSIGNMENT_RESOURCE_FIELD,
+                TEAM_RESOURCE_FIELD,
                 "bookableresourceid",
                 JoinOperator.LeftOuter);
             brLink.EntityAlias = "br";
@@ -164,7 +175,7 @@ namespace ADC.MppImport.Services
             {
                 Guid taskId = entity.Id;
 
-                if (seen.ContainsKey(taskId))
+                if (seen.ContainsKey(taskId) && seen[taskId].AssignedTo != null)
                     continue;
 
                 var roleOsv = entity.GetAttributeValue<OptionSetValue>(TASK_ROLE_FIELD);

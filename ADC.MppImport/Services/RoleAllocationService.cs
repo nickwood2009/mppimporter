@@ -159,16 +159,41 @@ namespace ADC.MppImport.Services
             tmLink.EntityAlias = "tm";
             tmLink.Columns.AddColumn(TEAM_RESOURCE_FIELD);
 
-            var brLink = tmLink.AddLink(
-                RESOURCE_ENTITY,
-                TEAM_RESOURCE_FIELD,
-                "bookableresourceid",
-                JoinOperator.LeftOuter);
-            brLink.EntityAlias = "br";
-            brLink.Columns.AddColumn(RESOURCE_USER_FIELD);
-
             var results = _service.RetrieveMultiple(query);
             _trace?.Trace("RoleAllocationService: Retrieved {0} rows (tasks x assignments)", results.Entities.Count);
+
+            // collect unique bookable resource IDs from team members
+            var brIds = new HashSet<Guid>();
+            foreach (var entity in results.Entities)
+            {
+                var brAlias = entity.GetAttributeValue<AliasedValue>("tm." + TEAM_RESOURCE_FIELD);
+                if (brAlias != null && brAlias.Value is EntityReference brRef)
+                    brIds.Add(brRef.Id);
+            }
+
+            // batch resolve bookable resource → systemuser
+            var brToUser = new Dictionary<Guid, EntityReference>();
+            if (brIds.Count > 0)
+            {
+                var brQuery = new QueryExpression(RESOURCE_ENTITY)
+                {
+                    ColumnSet = new ColumnSet(RESOURCE_USER_FIELD),
+                    Criteria = new FilterExpression()
+                };
+                var guids = new object[brIds.Count];
+                brIds.CopyTo(new Guid[brIds.Count], 0);
+                var guidList = new List<Guid>(brIds);
+                brQuery.Criteria.AddCondition("bookableresourceid", ConditionOperator.In, guidList.ConvertAll(g => (object)g).ToArray());
+
+                var brResults = _service.RetrieveMultiple(brQuery);
+                foreach (var br in brResults.Entities)
+                {
+                    var userRef = br.GetAttributeValue<EntityReference>(RESOURCE_USER_FIELD);
+                    if (userRef != null)
+                        brToUser[br.Id] = userRef;
+                }
+                _trace?.Trace("RoleAllocationService: Resolved {0} bookable resources → {1} users", brIds.Count, brToUser.Count);
+            }
 
             var seen = new Dictionary<Guid, TaskAllocationInfo>();
             foreach (var entity in results.Entities)
@@ -182,21 +207,17 @@ namespace ADC.MppImport.Services
                 int? roleType = roleOsv != null ? (int?)roleOsv.Value : null;
 
                 EntityReference assignedTo = null;
-                var teamAlias = entity.GetAttributeValue<AliasedValue>("ra." + ASSIGNMENT_TEAM_FIELD);
                 var brAlias = entity.GetAttributeValue<AliasedValue>("tm." + TEAM_RESOURCE_FIELD);
-                var userAlias = entity.GetAttributeValue<AliasedValue>("br." + RESOURCE_USER_FIELD);
+                if (brAlias != null && brAlias.Value is EntityReference brRef && brToUser.ContainsKey(brRef.Id))
+                {
+                    assignedTo = brToUser[brRef.Id];
+                }
 
-                _trace?.Trace("  Task {0} ({1}): team={2}, br={3}, user={4}",
+                _trace?.Trace("  Task {0} ({1}): br={2}, user={3}",
                     taskId,
                     entity.GetAttributeValue<string>(TASK_NAME_FIELD) ?? "",
-                    teamAlias != null ? teamAlias.Value?.ToString() ?? "null-val" : "null",
-                    brAlias != null ? brAlias.Value?.ToString() ?? "null-val" : "null",
-                    userAlias != null ? userAlias.Value?.ToString() ?? "null-val" : "null");
-
-                if (userAlias != null && userAlias.Value is EntityReference)
-                {
-                    assignedTo = (EntityReference)userAlias.Value;
-                }
+                    brAlias != null && brAlias.Value is EntityReference r ? r.Id.ToString() : "null",
+                    assignedTo != null ? assignedTo.Id.ToString() : "null");
 
                 var info = new TaskAllocationInfo
                 {

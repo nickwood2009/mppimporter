@@ -101,6 +101,7 @@
     <Compile Include="Workflows\ImportTemplateActivity.cs" />
     <Compile Include="Services\DayCountService.cs" />
     <Compile Include="Plugins\DayCountPlugin.cs" />
+    <Compile Include="Plugins\ValidateBookableResourceTypePlugin.cs" />
     <Compile Include="Workflows\RecalcDayCountsActivity.cs" />
     <Compile Include="Services\RoleAllocationService.cs" />
     <Compile Include="Workflows\ResolveRoleAllocationActivity.cs" />

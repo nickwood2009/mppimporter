@@ -177,7 +177,7 @@ namespace ADC.MppImport.Services
             {
                 var brQuery = new QueryExpression(RESOURCE_ENTITY)
                 {
-                    ColumnSet = new ColumnSet(true),
+                    ColumnSet = new ColumnSet(RESOURCE_USER_FIELD),
                     Criteria = new FilterExpression()
                 };
                 var guids = new object[brIds.Count];
